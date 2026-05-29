@@ -10,8 +10,10 @@ PROTON="$S/steamapps/common/Proton 11.0"
 PFX="$S/steamapps/compatdata/3529941548/pfx"
 EXE="/run/media/paths/SSS-Core/python projects/forzamania-release/tools/NadeoImporter.exe"
 USERDIR="$PFX/drive_c/users/steamuser/Documents/Trackmania"
-SUB="Items/freeporter-probe"          # relative path under Work/ and Items/
-WORK="$USERDIR/Work/$SUB"
+SUB="freeporter-probe"                # relative path under Work/Items/ and Items/
+WORK="$USERDIR/Work/Items/$SUB"
+# Importer writes compiled gbx to Items/<SUB>/ (mirrors the Work/Items/<SUB>/
+# source path: the leading "/Items/" in the arg maps to the Items/ root).
 OUT="$USERDIR/Items/$SUB"
 DEST="$REPO/tests/gen/golden"
 
@@ -44,7 +46,7 @@ for fbx in "$REPO"/tests/gen/out/*.fbx; do
   cp "$fbx" "$WORK/$stem.fbx"
   write_meshparams "$stem"
   # Importer resolves the path arg relative to Work/, leading slash.
-  wine "$EXE" Mesh "/$SUB/$stem.fbx"
+  wine "$EXE" Mesh "/Items/$SUB/$stem.fbx"
   echo "  importer exit: $?"
 done
 

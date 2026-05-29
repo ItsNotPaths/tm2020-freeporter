@@ -31,6 +31,35 @@ def reset_scene():
     bpy.ops.wm.read_factory_settings(use_empty=True)
 
 
+def add_lightmap_uv(mesh):
+    """NadeoImporter REQUIRES every material to have >= 2 UV layers
+    (BaseMaterial + LightMap) or mesh import fails: "not enough UvLayers for
+    material (1 < 2)". This was THE cause of our earlier exit-1 rejections.
+    Transcribed from forzamania scripts/blender_export.py::_add_lightmap_uv:
+    lay every face out in its own cell of a GxG grid (G=ceil(sqrt(faces))) so
+    the lightmap is non-overlapping per face. Pure arithmetic, no packer."""
+    import math
+    light = mesh.uv_layers.new(name="LightMap")
+    n = len(mesh.polygons)
+    if n == 0:
+        return
+    grid = max(1, math.ceil(math.sqrt(n)))
+    cell = 1.0 / grid
+    margin = cell * 0.05
+    inner = cell - 2 * margin
+    for fi, poly in enumerate(mesh.polygons):
+        cx = (fi % grid) * cell
+        cy = (fi // grid) * cell
+        corners = (
+            (cx + margin, cy + margin),
+            (cx + margin + inner, cy + margin),
+            (cx + margin + inner, cy + margin + inner),
+            (cx + margin, cy + margin + inner),
+        )
+        for k, li in enumerate(poly.loop_indices):
+            light.data[li].uv = corners[k % 4]
+
+
 def new_mesh_object(name, verts, faces, uvs=None):
     """Create a mesh object from explicit verts (list of (x,y,z)) and faces
     (list of index tuples). uvs: optional per-loop (u,v) list matching the
@@ -42,11 +71,19 @@ def new_mesh_object(name, verts, faces, uvs=None):
     mesh.from_pydata(verts, [], faces)
     mesh.update()
 
-    # UV layer (NadeoImporter expects at least the base UV).
-    uv_layer = mesh.uv_layers.new(name="UVMap")
+    # Base UV layer — must be named "BaseMaterial" (NadeoImporter looks for it
+    # at index 0 for diffuse). Then add the required 2nd LightMap layer.
+    uv_layer = mesh.uv_layers.new(name="BaseMaterial")
     if uvs is not None:
         for i, loop in enumerate(mesh.loops):
             uv_layer.data[i].uv = uvs[i]
+
+    add_lightmap_uv(mesh)
+    # Leave BaseMaterial active (exporter writes the active layer first).
+    for i, layer in enumerate(mesh.uv_layers):
+        if layer.name == "BaseMaterial":
+            mesh.uv_layers.active_index = i
+            break
 
     return obj
 

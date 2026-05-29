@@ -8,5 +8,7 @@ nadeo-freeporter
 # compiled test binaries (the .nim sources are tracked)
 tests/lzo_roundtrip
 tests/roundtrip_gbx
-# generated FBX fixtures (the generator script is tracked)
+# generated FBX fixtures + importer goldens (the generator scripts are tracked)
 tests/gen/out/
+tests/gen/golden/
+tests/probe_diff
