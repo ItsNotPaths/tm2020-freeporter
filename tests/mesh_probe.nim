@@ -62,6 +62,14 @@ proc ids(r: var GbxReader, name: string): string =
   let p = r.pos; result = r.readId()
   echo "@", align($p,5), " ", pad(), name, " = id\"", result, "\""
 
+proc bb(r: var GbxReader, name: string): int =
+  let p = r.pos; result = int(r.readU8())
+  echo "@", align($p,5), " ", pad(), name, " = ", result
+
+proc strv(r: var GbxReader, name: string): string =
+  let p = r.pos; result = r.readString()
+  echo "@", align($p,5), " ", pad(), name, " = \"", result, "\""
+
 proc hexAround(body: seq[byte], pos: int, n = 64) =
   let hi = min(body.len, pos + n)
   var line = ""
@@ -202,6 +210,32 @@ proc readNode(r: var GbxReader, body: seq[byte], classId: uint32) =
         for k in 0 ..< n:
           cur += int(cast[int16](r.readU16())); s.add $cur & " "
         echo pad(), "indices(delta) = ", s
+    of 0x090FD000'u32:   # CPlugMaterialUserInst main chunk (v11)
+      let ver = r.i("MUI.version")
+      discard r.bb("MUI.IsUsingGameMaterial")  # boolbyte (v11+)
+      discard r.ids("MUI.MaterialName")
+      discard r.ids("MUI.Model")
+      discard r.strv("MUI.BaseTexture")
+      discard r.bb("MUI.SurfacePhysicId")
+      discard r.bb("MUI.SurfaceGameplayId")    # v10+
+      discard r.ids("MUI.Link")
+      discard r.i("MUI.Csts.count")
+      discard r.i("MUI.Color.count")
+      discard r.i("MUI.UvAnims.count")
+      discard r.i("MUI.ids.count")
+      discard r.i("MUI.UserTextures.count")
+      discard r.ids("MUI.HidingGroup")
+    of 0x090FD001'u32:   # CPlugMaterialUserInst chunk 0x001 (v5)
+      discard r.i("MUI1.version")
+      discard r.i("MUI1.bitmapAtlas(ref)")
+      discard r.i("MUI1.tilingU")
+      discard r.i("MUI1.tilingV")
+      discard r.f("MUI1.texSizeMeters")
+      discard r.i("MUI1.u01")
+      discard r.i("MUI1.isNatural")           # i32 bool (NOT boolbyte)
+    of 0x090FD002'u32:   # CPlugMaterialUserInst chunk 0x002
+      discard r.i("MUI2.version")
+      discard r.i("MUI2.int")
     of 0x0902C003'u32:
       echo pad(), "!! CPlugVisual3D inline verts chunk — stopping to inspect"
       hexAround(body, r.pos); quit 1
@@ -285,10 +319,8 @@ proc main() =
   discard r.i("U07")                            # v30
   # customMaterials Material[custom] (count read far earlier = `custom`)
   for m in 0 ..< custom:
-    let nm = r.st("  customMaterial[" & $m & "].name")
-    if nm.len == 0:
-      echo "  !! empty material name -> CPlugMaterialUserInst (not decoded)"
-      hexAround(body, r.pos); quit 1
+    discard r.strv("customMaterial[" & $m & "].name")   # Material.MaterialName
+    discard r.readNodeRef(body, "  matInst[" & $m & "]")
   let nJoints = r.i("joints.count")             # v20 ArrayId
   for k in 0 ..< nJoints: discard r.ids("  joint")
   let nU10 = r.i("U10.count"); r.skip(4*nU10)   # v22

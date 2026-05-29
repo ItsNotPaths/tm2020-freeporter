@@ -31,6 +31,7 @@
 import std/math
 import gbx
 import ufbx
+import materials
 
 # 6 vertex DataDecls (Position Float3, Normal Dec3N, TexCoord0/1 Float2,
 # TangentU/V Dec3N) — geometry-independent, emitted verbatim.
@@ -41,30 +42,6 @@ const dataDecls = [
   0x60'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x18'u8, 0x00'u8, 0x12'u8, 0x1C'u8, 0xA0'u8, 0x10'u8,
   0x80'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x20'u8, 0x00'u8, 0x14'u8, 0x1C'u8, 0xA0'u8, 0x10'u8,
   0x90'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x24'u8, 0x00'u8,
-]
-
-# Trailing blob from U07 (int 1) to end of body: U07, the customMaterial
-# CPlugMaterialUserInst node ("Mat0" -> "PlatformTech"), empty joints / U10..U18,
-# and the skippable fake-occlusion chunk 0x090BB002 + final FACADE. Constant across
-# the ladder (single stock material), emitted verbatim.
-const meshTail = [
-  0x01'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x03'u8, 0x00'u8, 0x00'u8, 0x00'u8,
-  0x00'u8, 0xD0'u8, 0x0F'u8, 0x09'u8, 0x00'u8, 0xD0'u8, 0x0F'u8, 0x09'u8, 0x0B'u8, 0x00'u8, 0x00'u8, 0x00'u8,
-  0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x40'u8, 0x04'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x4D'u8, 0x61'u8, 0x74'u8,
-  0x30'u8, 0xFF'u8, 0xFF'u8, 0xFF'u8, 0xFF'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x10'u8, 0x00'u8, 0x00'u8,
-  0x00'u8, 0x00'u8, 0x40'u8, 0x0C'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x50'u8, 0x6C'u8, 0x61'u8, 0x74'u8, 0x66'u8,
-  0x6F'u8, 0x72'u8, 0x6D'u8, 0x54'u8, 0x65'u8, 0x63'u8, 0x68'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8,
-  0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8,
-  0x00'u8, 0x00'u8, 0x00'u8, 0xFF'u8, 0xFF'u8, 0xFF'u8, 0xFF'u8, 0x01'u8, 0xD0'u8, 0x0F'u8, 0x09'u8, 0x05'u8,
-  0x00'u8, 0x00'u8, 0x00'u8, 0xFF'u8, 0xFF'u8, 0xFF'u8, 0xFF'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8,
-  0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x80'u8, 0x3F'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8,
-  0x00'u8, 0x00'u8, 0x00'u8, 0x02'u8, 0xD0'u8, 0x0F'u8, 0x09'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8,
-  0x00'u8, 0x00'u8, 0x00'u8, 0x01'u8, 0xDE'u8, 0xCA'u8, 0xFA'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8,
-  0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8,
-  0x00'u8, 0x00'u8, 0x00'u8, 0xFF'u8, 0xFF'u8, 0xFF'u8, 0xFF'u8, 0x00'u8, 0x00'u8, 0x80'u8, 0x3F'u8, 0x00'u8,
-  0x00'u8, 0x80'u8, 0x3F'u8, 0xFF'u8, 0xFF'u8, 0xFF'u8, 0xFF'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x02'u8,
-  0xB0'u8, 0x0B'u8, 0x09'u8, 0x50'u8, 0x49'u8, 0x4B'u8, 0x53'u8, 0x08'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8,
-  0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x01'u8, 0xDE'u8, 0xCA'u8, 0xFA'u8,
 ]
 
 const matFolder = "Stadium\\Media\\Material\\"
@@ -83,6 +60,46 @@ proc putDec3N(w: var GbxWriter, v: Vec3) =
     uint32(int(round(cc * 511.0'f32)) and 0x3FF)
   w.putU32((q(v[2]) shl 20) or (q(v[1]) shl 10) or q(v[0]))
 
+proc writeId(w: var GbxWriter, s: string) =
+  ## Lookback-string write: empty -> 0xFFFFFFFF; otherwise a fresh local name
+  ## (flag 0x40000000 + the string). All our material Names/Links are distinct, so
+  ## we never emit back-references (would need dict tracking — see materials note).
+  if s.len == 0: w.putU32(0xFFFFFFFF'u32)
+  else: (w.putU32(0x40000000'u32); w.putStr(s))
+
+proc writeMaterialNode(w: var GbxWriter, m: MeshMaterial, nodeIndex: int32) =
+  ## One customMaterials entry: the Material archive (empty name) then an inline
+  ## CPlugMaterialUserInst node-ref (chunks 0x090FD000/001/002). All fields constant
+  ## except MaterialName, SurfacePhysicId, SurfaceGameplayId, Link.
+  w.putStr("")                      # Material.MaterialName (empty -> inst follows)
+  w.putI32(nodeIndex)               # node-ref index
+  w.putU32(0x090FD000'u32)          # CPlugMaterialUserInst class id
+  # chunk 0x090FD000 (v11)
+  w.putU32(0x090FD000'u32)
+  w.putI32(11)                      # version
+  w.putU8(0)                        # IsUsingGameMaterial (boolbyte)
+  w.writeId(m.name)                 # MaterialName
+  w.writeId("")                     # Model
+  w.putStr("")                      # BaseTexture
+  w.putU8(m.physicsId)              # SurfacePhysicId
+  w.putU8(m.gameplayId)             # SurfaceGameplayId
+  w.writeId(m.link)                 # Link
+  w.putI32(0); w.putI32(0); w.putI32(0); w.putI32(0); w.putI32(0)  # Csts/Color/UvAnims/ids/UserTextures
+  w.writeId("")                     # HidingGroup
+  # chunk 0x090FD001 (v5)
+  w.putU32(0x090FD001'u32)
+  w.putI32(5)                       # version
+  w.putI32(-1)                      # bitmapAtlas ref (null)
+  w.putI32(0)                       # TilingU
+  w.putI32(0)                       # TilingV
+  w.putF32(1.0'f32)                 # TextureSizeInMeters
+  w.putI32(0)                       # u01
+  w.putI32(0)                       # IsNatural (i32 bool)
+  # chunk 0x090FD002
+  w.putU32(0x090FD002'u32)
+  w.putI32(0); w.putI32(0)          # version, int
+  w.putU32(0xFACADE01'u32)          # end inst node
+
 type Tri = tuple[c0, c1, c2: int]   # three corner indices, fan order
 
 proc triangulate(mesh: FbxMesh): seq[Tri] =
@@ -92,10 +109,15 @@ proc triangulate(mesh: FbxMesh): seq[Tri] =
     for k in 1 ..< f.count - 1:
       result.add (f.first, f.first + k, f.first + k + 1)
 
-proc buildMeshBody*(mesh: FbxMesh, fileWriteTime: int64, sourceTag: string): seq[byte] =
-  ## Serialize the decompressed CPlugSolid2Model body. `fileWriteTime` and
-  ## `sourceTag` are the only non-geometric inputs (pass a golden's values to
-  ## reproduce it byte-for-byte; see module doc).
+proc buildMeshBody*(mesh: FbxMesh, materials: seq[MeshMaterial],
+                    fileWriteTime: int64, sourceTag: string): seq[byte] =
+  ## Serialize the decompressed CPlugSolid2Model body. `materials` is the parsed
+  ## MeshParams binding (Name/Link/PhysicsId). `fileWriteTime` and `sourceTag` are
+  ## the only non-geometric inputs (pass a golden's values to reproduce it
+  ## byte-for-byte; see module doc). NOTE: a single material is supported byte-exact;
+  ## multiple materials need per-material visual grouping (mapped, not yet built).
+  doAssert materials.len == 1,
+    "multi-material meshes not yet supported (needs per-material visual grouping)"
   let tris = triangulate(mesh)
   let nTris = tris.len
   let nVerts = nTris * 3
@@ -209,7 +231,7 @@ proc buildMeshBody*(mesh: FbxMesh, fileWriteTime: int64, sourceTag: string): seq
 
   # outer tail
   w.putI32(0)                     # materialIds[]
-  w.putI32(1)                     # customMaterials count
+  w.putI32(int32(materials.len))  # customMaterials count
   w.putI32(-1)                    # skel ref (null)
   w.putI32(0)                     # lodMaxDistAtFov90[]
   w.putI32(1)                     # visCstType
@@ -260,7 +282,27 @@ proc buildMeshBody*(mesh: FbxMesh, fileWriteTime: int64, sourceTag: string): seq
   w.putU32(0)                     # flags
   w.putI32(1)                     # U05
   w.putStr(sourceTag)             # U06 (source path)
-  w.putBytes(meshTail)            # U07 .. end (constant)
+  w.putI32(1)                     # U07
+  # customMaterials array: one CPlugMaterialUserInst per material. Single-material
+  # mesh has nodeIndex 3 (visual=1, vertexStream=2, matInst=3).
+  w.writeMaterialNode(materials[0], 3)
+  # constant model tail: joints[], U10-U13, U14 ref(null), U15/U16=1.0, U17 id,
+  # U18, then the skippable fake-occlusion chunk 0x090BB002 (empty) + node FACADE.
+  w.putI32(0)                     # joints[]
+  w.putI32(0)                     # U10[]
+  w.putI32(0)                     # U11
+  w.putI32(0)                     # U12[]
+  w.putI32(0)                     # U13
+  w.putI32(-1)                    # U14 ref (null)
+  w.putF32(1.0'f32)               # U15
+  w.putF32(1.0'f32)               # U16
+  w.writeId("")                   # U17
+  w.putI32(0)                     # U18
+  w.putU32(0x090BB002'u32)        # skippable fake-occlusion chunk
+  w.putU32(0x534B4950'u32)        # "SKIP"
+  w.putI32(8)                     # chunk size
+  w.putI32(0); w.putI32(0)        # FileImageBytes len 0 + FakeOccProjs count 0
+  w.putU32(0xFACADE01'u32)        # end CPlugSolid2Model node
   result = w.buf
 
 # Header user data: one header chunk descriptor (chunk 0x090BB000), constant
@@ -286,11 +328,13 @@ proc meshInfo*(): GbxInfo =
     numNodes: 4,
     numExternalNodes: 0)
 
-proc buildMeshGbx*(mesh: FbxMesh, fileWriteTime: int64, sourceTag: string): seq[byte] =
+proc buildMeshGbx*(mesh: FbxMesh, materials: seq[MeshMaterial],
+                   fileWriteTime: int64, sourceTag: string): seq[byte] =
   ## Full .Mesh.Gbx file bytes (header + framing + LZO-compressed body). The LZO
   ## bytes differ from Nadeo's (LZO1X-1 vs -999) but decompress to the byte-identical
   ## body; the game reads the decompressed content. See [[shape-body-solved]].
-  writeGbx(meshInfo(), buildMeshBody(mesh, fileWriteTime, sourceTag))
+  writeGbx(meshInfo(), buildMeshBody(mesh, materials, fileWriteTime, sourceTag))
 
-proc saveMeshGbx*(path: string, mesh: FbxMesh, fileWriteTime: int64, sourceTag: string) =
-  saveGbx(path, meshInfo(), buildMeshBody(mesh, fileWriteTime, sourceTag))
+proc saveMeshGbx*(path: string, mesh: FbxMesh, materials: seq[MeshMaterial],
+                  fileWriteTime: int64, sourceTag: string) =
+  saveGbx(path, meshInfo(), buildMeshBody(mesh, materials, fileWriteTime, sourceTag))

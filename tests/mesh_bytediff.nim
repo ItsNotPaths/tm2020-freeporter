@@ -13,10 +13,12 @@ import std/[strutils, os]
 import "../src/gbx"
 import "../src/ufbx"
 import "../src/mesh"
+import "../src/materials"
 
 const fixtures = ["01_triangle", "02_two_triangles", "03_unit_cube", "04_triangle_shifted",
                   "05_smooth_cube", "06_tilted_triangle", "07_tilted_degenerate",
-                  "08_tri3", "09_tri5", "10_tri7"]
+                  "08_tri3", "09_tri5", "10_tri7",
+                  "11_mat_link", "12_mat_physics", "13_two_materials"]
 
 # Meshes with DEGENERATE (all-zero) UVs: NadeoImporter synthesizes a tangent frame
 # its own way for UV-less geometry, which neither ufbx's passthrough tangents nor a
@@ -53,14 +55,21 @@ for n in fixtures:
   doAssert ok, n & ": FBX load failed: " & err
   let (_, golden) = loadGbx(goldenPath)
 
+  # Material binding: the fixture's MeshParams.xml if present, else the default.
+  let mpPath = "tests/gen/out/" & n & ".MeshParams.xml"
+  let mats = (if fileExists(mpPath): parseMeshParams(mpPath) else: defaultMaterials())
+  if mats.len > 1:
+    echo n, ": SKIP (multi-material; per-material visual grouping not yet built)"
+    continue
+
   # Locate the two non-geometric fields by diffing our own builds.
-  let ftOff = firstDiff(buildMeshBody(mesh, 0, ""), buildMeshBody(mesh, 1, ""))
-  let tagOff = firstDiff(buildMeshBody(mesh, 0, ""), buildMeshBody(mesh, 0, "x"))
+  let ftOff = firstDiff(buildMeshBody(mesh, mats, 0, ""), buildMeshBody(mesh, mats, 1, ""))
+  let tagOff = firstDiff(buildMeshBody(mesh, mats, 0, ""), buildMeshBody(mesh, mats, 0, "x"))
   doAssert ftOff >= 0 and tagOff >= 0, n & ": could not locate variable fields"
   # Extract the golden's values and rebuild to match it exactly.
   let ft = readI64At(golden, ftOff)
   let tag = readStrAt(golden, tagOff)
-  let ours = buildMeshBody(mesh, ft, tag)
+  let ours = buildMeshBody(mesh, mats, ft, tag)
 
   if ours == golden:
     # Full-file checks only make sense once the body matches: header bytes
@@ -68,7 +77,7 @@ for n in fixtures:
     let goldenRaw = cast[seq[byte]](readFile(goldenPath))
     var gr = initGbxReader(goldenRaw)
     let gInfo = gr.parseHeader()
-    let ourFile = buildMeshGbx(mesh, ft, tag)
+    let ourFile = buildMeshGbx(mesh, mats, ft, tag)
     doAssert ourFile[0 ..< gInfo.bodyStart] == goldenRaw[0 ..< gInfo.bodyStart],
       n & ": header bytes differ from golden"
     var rr = initGbxReader(ourFile)

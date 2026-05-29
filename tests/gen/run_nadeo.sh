@@ -44,7 +44,13 @@ for fbx in "$REPO"/tests/gen/out/*.fbx; do
   stem="$(basename "$fbx" .fbx)"
   echo "===== $stem ====="
   cp "$fbx" "$WORK/$stem.fbx"
-  write_meshparams "$stem"
+  # Use the fixture's own MeshParams.xml if make_fixtures.py wrote one (material
+  # fixtures vary Link/PhysicsId); else the default Mat0->PlatformTech/Asphalt.
+  if [ -f "$REPO/tests/gen/out/$stem.MeshParams.xml" ]; then
+    cp "$REPO/tests/gen/out/$stem.MeshParams.xml" "$WORK/$stem.MeshParams.xml"
+  else
+    write_meshparams "$stem"
+  fi
   # Importer resolves the path arg relative to Work/, leading slash.
   wine "$EXE" Mesh "/Items/$SUB/$stem.fbx"
   echo "  importer exit: $?"

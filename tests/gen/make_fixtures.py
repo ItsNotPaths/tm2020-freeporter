@@ -97,6 +97,21 @@ def assign_material(obj, mat_name):
     obj.data.materials.append(mat)
 
 
+def write_meshparams(d, stem, materials):
+    """Write <stem>.MeshParams.xml next to the fbx. materials: list of
+    (Name, Link, PhysicsId). run_nadeo.sh copies this if present, else writes a
+    default Mat0->PlatformTech/Asphalt. Lets material fixtures vary the binding."""
+    rows = "\n".join(
+        '        <Material Name="%s" Link="%s" PhysicsId="%s" />' % (n, l, p)
+        for (n, l, p) in materials)
+    xml = ('<?xml version="1.0" ?>\n'
+           '<MeshParams Scale="1.0" MeshType="Static" Collection="Stadium" '
+           'FbxFile="%s.fbx">\n    <Materials>\n%s\n    </Materials>\n'
+           '    <Lights/>\n</MeshParams>\n') % (stem, rows)
+    with open(os.path.join(d, stem + ".MeshParams.xml"), "w") as f:
+        f.write(xml)
+
+
 def export_fbx(path):
     # These flags are copied verbatim from forzamania's known-good exporter
     # (forzamania/scripts/blender_export.py). NadeoImporter is picky about axis
@@ -234,6 +249,54 @@ def fixture_tri_fan(d, n, fname):
     export_fbx(os.path.join(d, fname))
 
 
+def fixture_mat_link(d):
+    # Triangle (real UVs) but Link=RoadTech instead of PlatformTech — isolates the
+    # Link string in the material node (vs 01_triangle).
+    reset_scene()
+    verts = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)]
+    faces = [(0, 1, 2)]
+    uvs = [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0)]
+    obj = new_mesh_object("tri", verts, faces, uvs)
+    assign_material(obj, "Mat0")
+    export_fbx(os.path.join(d, "11_mat_link.fbx"))
+    write_meshparams(d, "11_mat_link", [("Mat0", "RoadTech", "Asphalt")])
+
+
+def fixture_mat_physics(d):
+    # Triangle but PhysicsId=Dirt instead of Asphalt — isolates the SurfacePhysicId
+    # byte (MaterialId enum: Dirt=6 vs Asphalt=16) in both the Mesh material node
+    # AND the Shape collision (per-tri surfaceIndex + tail U02).
+    reset_scene()
+    verts = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)]
+    faces = [(0, 1, 2)]
+    uvs = [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0)]
+    obj = new_mesh_object("tri", verts, faces, uvs)
+    assign_material(obj, "Mat0")
+    export_fbx(os.path.join(d, "12_mat_physics.fbx"))
+    write_meshparams(d, "12_mat_physics", [("Mat0", "PlatformTech", "Dirt")])
+
+
+def fixture_two_materials(d):
+    # A quad split into two triangles, each with its OWN material (different Link
+    # AND PhysicsId) — maps how multiple materials grow the ShadedGeom list, the
+    # customMaterials array, and whether triangles get grouped/reordered.
+    reset_scene()
+    verts = [(0, 0, 0), (1, 0, 0), (0, 1, 0), (1, 1, 0)]
+    faces = [(0, 1, 2), (1, 3, 2)]
+    uvs = [(0, 0), (1, 0), (0, 1), (1, 0), (1, 1), (0, 1)]
+    obj = new_mesh_object("quad2", verts, faces, uvs)
+    m0 = bpy.data.materials.new("Mat0")
+    m1 = bpy.data.materials.new("Mat1")
+    obj.data.materials.append(m0)
+    obj.data.materials.append(m1)
+    obj.data.polygons[0].material_index = 0
+    obj.data.polygons[1].material_index = 1
+    export_fbx(os.path.join(d, "13_two_materials.fbx"))
+    write_meshparams(d, "13_two_materials",
+                     [("Mat0", "PlatformTech", "Asphalt"),
+                      ("Mat1", "RoadTech", "Dirt")])
+
+
 def main():
     d = out_dir()
     os.makedirs(d, exist_ok=True)
@@ -247,6 +310,9 @@ def main():
     fixture_tri_fan(d, 3, "08_tri3.fbx")
     fixture_tri_fan(d, 5, "09_tri5.fbx")
     fixture_tri_fan(d, 7, "10_tri7.fbx")
+    fixture_mat_link(d)
+    fixture_mat_physics(d)
+    fixture_two_materials(d)
     print("FIXTURES_WRITTEN:", d)
 
 

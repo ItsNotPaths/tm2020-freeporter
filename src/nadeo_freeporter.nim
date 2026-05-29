@@ -16,6 +16,7 @@ import ufbx
 import gbx
 import shape
 import mesh
+import materials
 
 const usageText = """
 nadeo-freeporter — Linux mesh -> TM2020 .Item.Gbx importer
@@ -117,15 +118,27 @@ proc run(mode: Mode, path: string): int =
       echo "  bbox min:  ", lo[0], " ", lo[1], " ", lo[2]
       echo "  bbox max:  ", hi[0], " ", hi[1], " ", hi[2]
 
+    # Material binding from the sibling <fbx>.MeshParams.xml (mirroring
+    # NadeoImporter); fall back to the stock default if it's absent.
+    let (dir, name, _) = splitFile(path)
+    let mpPath = dir / (name & ".MeshParams.xml")
+    let mats = (if fileExists(mpPath): parseMeshParams(mpPath) else: defaultMaterials())
+    echo "  meshparams: ", (if fileExists(mpPath): mpPath else: "(default)")
+    for mat in mats:
+      echo "    ", mat.name, " -> ", mat.link, " (physics ", mat.physicsId, ")"
+    if mats.len != 1:
+      stderr.writeLine "nadeo-freeporter: multi-material meshes not yet supported (" &
+        $mats.len & " materials); per-material visual grouping is the next step."
+      return 2
+
     # Emit both the .Shape.Gbx (collision) and the .Mesh.Gbx (render mesh).
     discard writeShapeFor(path, m)
-    let (dir, name, _) = splitFile(path)
     let meshPath = dir / (name & ".Mesh.Gbx")
     # fileWriteTime is a Windows FILETIME (100ns ticks since 1601); sourceTag mirrors
     # NadeoImporter's embedded source-path string. Both are non-geometric.
-    let ft = (unixTimeToWinTime(int64(epochTime())))
+    let ft = unixTimeToWinTime(int64(epochTime()))
     let sourceTag = "NadeoImporter Mesh Items\\" & name & ".fbx"
-    saveMeshGbx(meshPath, m, ft, sourceTag)
+    saveMeshGbx(meshPath, m, mats, ft, sourceTag)
     echo "wrote ", meshPath
     return 0
 
