@@ -101,27 +101,30 @@ proc writeMaterialNode(w: var GbxWriter, m: MeshMaterial, nodeIndex: int32) =
   w.putU32(0xFACADE01'u32)          # end inst node
 
 type Tri = tuple[c0, c1, c2: int]   # three corner indices, fan order
+type Group = tuple[mat: int, tris: seq[Tri]]   # one material's triangles
 
-proc triangulate(mesh: FbxMesh): seq[Tri] =
-  ## Fan-triangulate every face, preserving FBX corner order (= NadeoImporter's
-  ## triangle/vertex emission order on these fixtures).
+proc triGroups*(mesh: FbxMesh): seq[Group] =
+  ## Fan-triangulate every face, GROUPED BY material slot (ascending, non-empty),
+  ## preserving FBX face order within a group. NadeoImporter emits one visual per
+  ## material this way (confirmed by fixture 13). Single-material meshes -> 1 group
+  ## holding all triangles in face order.
+  var maxMat = 0
   for f in mesh.faces:
-    for k in 1 ..< f.count - 1:
-      result.add (f.first, f.first + k, f.first + k + 1)
+    if f.material > maxMat: maxMat = f.material
+  for slot in 0 .. maxMat:
+    var ts: seq[Tri] = @[]
+    for f in mesh.faces:
+      if f.material == slot:
+        for k in 1 ..< f.count - 1:
+          ts.add (f.first, f.first + k, f.first + k + 1)
+    if ts.len > 0: result.add (slot, ts)
 
-proc buildMeshBody*(mesh: FbxMesh, materials: seq[MeshMaterial],
-                    fileWriteTime: int64, sourceTag: string): seq[byte] =
-  ## Serialize the decompressed CPlugSolid2Model body. `materials` is the parsed
-  ## MeshParams binding (Name/Link/PhysicsId). `fileWriteTime` and `sourceTag` are
-  ## the only non-geometric inputs (pass a golden's values to reproduce it
-  ## byte-for-byte; see module doc). NOTE: a single material is supported byte-exact;
-  ## multiple materials need per-material visual grouping (mapped, not yet built).
-  doAssert materials.len == 1,
-    "multi-material meshes not yet supported (needs per-material visual grouping)"
-  let tris = triangulate(mesh)
-  let nTris = tris.len
-  let nVerts = nTris * 3
-
+proc writeVisual(w: var GbxWriter, mesh: FbxMesh, tris: seq[Tri], nodeIndex: int32) =
+  ## Emit one CPlugVisualIndexedTriangles node-ref (+ its CPlugVertexStream and
+  ## inline CPlugIndexBuffer) for `tris`. The vertex stream is node `nodeIndex+1`.
+  ## All vertex attributes are passthrough; verts are exploded (3 per triangle),
+  ## indices the identity 0..3k-1. See module doc.
+  let nVerts = tris.len * 3
   proc pos(c: int): Vec3 =
     let p = mesh.cornerPos[c]
     [mesh.positions[p*3], mesh.positions[p*3+1], mesh.positions[p*3+2]]
@@ -134,28 +137,13 @@ proc buildMeshBody*(mesh: FbxMesh, materials: seq[MeshMaterial],
   proc bitan(c: int): Vec3 =
     [mesh.cornerBitangent[c*3], mesh.cornerBitangent[c*3+1], mesh.cornerBitangent[c*3+2]]
 
-  var w = initGbxWriter()
-  w.putU32(0x090BB000'u32)        # chunk id
-  w.putI32(32)                    # version
-  w.putI32(3)                     # Id version (first Id in the body)
-  w.putU32(0xFFFFFFFF'u32)        # U01 = empty Id
-
-  # ShadedGeom[1]
-  w.putI32(1)
-  w.putI32(0); w.putI32(0); w.putI32(-1); w.putI32(1); w.putI32(0)
-
-  # visuals: deprecVersion, count, one node-ref
-  w.putI32(10)                    # deprec version
-  w.putI32(1)                     # count
-  w.putI32(1)                     # node index
+  w.putI32(nodeIndex)             # visual node index
   w.putU32(0x0901E000'u32)        # CPlugVisualIndexedTriangles
-
   # CPlugVisual base chunks
   w.putU32(0x09006001'u32); w.putU32(0xFFFFFFFF'u32)   # id = empty
   w.putU32(0x09006005'u32); w.putI32(0)                # SubVisuals[]
   w.putU32(0x09006009'u32); w.putF32(0.0'f32)          # float
   w.putU32(0x0900600B'u32); w.putI32(0)                # Splits[]
-
   # CPlugVisual chunk 0x0900600F
   w.putU32(0x0900600F'u32)
   w.putI32(6)                     # version
@@ -163,9 +151,8 @@ proc buildMeshBody*(mesh: FbxMesh, materials: seq[MeshMaterial],
   w.putI32(0)                     # numTexCoordSets (TM2020 uses vertex streams)
   w.putI32(int32(nVerts))         # Count
   w.putI32(1)                     # VertexStreams count
-  w.putI32(2)                     # node index
+  w.putI32(nodeIndex + 1)         # vertex-stream node index
   w.putU32(0x09056000'u32)        # CPlugVertexStream
-
   # CPlugVertexStream chunk 0x09056000
   w.putU32(0x09056000'u32)
   w.putI32(1)                     # version
@@ -175,32 +162,23 @@ proc buildMeshBody*(mesh: FbxMesh, materials: seq[MeshMaterial],
   w.putI32(6)                     # DataDecl count
   w.putBytes(dataDecls)
   w.putI32(1)                     # VStream bool
-
-  # Positions
-  for t in tris:
+  for t in tris:                  # Positions
     for c in [t.c0, t.c1, t.c2]:
-      let p = pos(c)
-      w.putF32(p[0]); w.putF32(p[1]); w.putF32(p[2])
-  # Normals (Dec3N)
-  for t in tris:
+      let p = pos(c); w.putF32(p[0]); w.putF32(p[1]); w.putF32(p[2])
+  for t in tris:                  # Normals (Dec3N)
     for c in [t.c0, t.c1, t.c2]: w.putDec3N(nrm(c))
-  # TexCoord0 (authored UV)
-  for t in tris:
+  for t in tris:                  # TexCoord0 (authored UV)
     for c in [t.c0, t.c1, t.c2]:
       let a = uv(c); w.putF32(a[0]); w.putF32(a[1])
-  # TexCoord1 (lightmap UV) — passthrough from the FBX 2nd UV set (the Blender
-  # exporter generates the per-face lightmap atlas; NadeoImporter just copies it).
-  for t in tris:
+  for t in tris:                  # TexCoord1 (lightmap UV, passthrough)
     for c in [t.c0, t.c1, t.c2]:
       let a = lm(c); w.putF32(a[0]); w.putF32(a[1])
-  # TangentU/TangentV (Dec3N) — passthrough of the FBX tangent frame (use_tspace).
-  for t in tris:
+  for t in tris:                  # TangentU (Dec3N, passthrough)
     for c in [t.c0, t.c1, t.c2]: w.putDec3N(tan(c))
-  for t in tris:
+  for t in tris:                  # TangentV (Dec3N, passthrough)
     for c in [t.c0, t.c1, t.c2]: w.putDec3N(bitan(c))
   w.putU32(0xFACADE01'u32)        # end CPlugVertexStream node
-
-  # Bounding box (center, halfSize) over all emitted positions.
+  # Bounding box (center, halfSize) over this group's positions.
   var lo = pos(tris[0].c0); var hi = lo
   for t in tris:
     for c in [t.c0, t.c1, t.c2]:
@@ -210,18 +188,15 @@ proc buildMeshBody*(mesh: FbxMesh, materials: seq[MeshMaterial],
         if p[a] > hi[a]: hi[a] = p[a]
   for a in 0 .. 2: w.putF32((lo[a] + hi[a]) * 0.5'f32)   # center
   for a in 0 .. 2: w.putF32((hi[a] - lo[a]) * 0.5'f32)   # half size
-
   w.putI32(0)                     # BitmapElemToPack[]
   w.putI32(0)                     # UvGroups[]
   w.putI32(0); w.putI32(0)        # 0x0900600F U02, U03
-
   # remaining visual-node chunks
   w.putU32(0x09006010'u32); w.putI32(0); w.putI32(0)     # version, MorphCount
   w.putU32(0x0902C002'u32); w.putI32(-1)                 # CMwNod ref
   w.putU32(0x0902C004'u32); w.putI32(0); w.putI32(0)     # tangent counts
   w.putU32(0x0906A001'u32); w.putI32(1)                  # hasIndexBuffer
-  # inline CPlugIndexBuffer (no index/classId), chunk 0x09057001
-  w.putU32(0x09057001'u32)
+  w.putU32(0x09057001'u32)        # inline CPlugIndexBuffer chunk
   w.putI32(2)                     # Flags
   w.putI32(int32(nVerts))         # index count
   w.putU16(0'u16)                 # delta-encoded i16: first = 0
@@ -229,36 +204,76 @@ proc buildMeshBody*(mesh: FbxMesh, materials: seq[MeshMaterial],
   w.putU32(0xFACADE01'u32)        # end index-buffer node
   w.putU32(0xFACADE01'u32)        # end visual node
 
+proc buildMeshBody*(mesh: FbxMesh, materials: seq[MeshMaterial],
+                    fileWriteTime: int64, sourceTag: string): seq[byte] =
+  ## Serialize the decompressed CPlugSolid2Model body. `materials` is the parsed
+  ## MeshParams binding (Name/Link/PhysicsId). `fileWriteTime` and `sourceTag` are
+  ## the only non-geometric inputs (pass a golden's values to reproduce it
+  ## byte-for-byte; see module doc). Multiple materials are emitted as one visual +
+  ## vertex stream per material group, N ShadedGeoms and N CPlugMaterialUserInst
+  ## nodes (PreLightGen stays model-level over all triangles).
+  let groups = triGroups(mesh)
+  doAssert groups.len > 0, "mesh has no triangles"
+  let n = groups.len
+
+  # Resolve each group's material (by FBX material name) from the MeshParams binding.
+  proc materialFor(slot: int): MeshMaterial =
+    let nm = mesh.materials[slot]
+    for mm in materials:
+      if mm.name == nm: return mm
+    raise newException(ValueError, "no MeshParams material named '" & nm & "'")
+
+  # Accessors for the model-level PreLightGen (aggregated over ALL triangles).
+  proc pos(c: int): Vec3 =
+    let p = mesh.cornerPos[c]
+    [mesh.positions[p*3], mesh.positions[p*3+1], mesh.positions[p*3+2]]
+  proc lm(c: int): array[2, float32] = [mesh.cornerUv2[c*2], mesh.cornerUv2[c*2+1]]
+
+  var w = initGbxWriter()
+  w.putU32(0x090BB000'u32)        # chunk id
+  w.putI32(32)                    # version
+  w.putI32(3)                     # Id version (first Id in the body)
+  w.putU32(0xFFFFFFFF'u32)        # U01 = empty Id
+
+  # ShadedGeom[n]: one per material group (visualIndex g, materialIndex g).
+  w.putI32(int32(n))
+  for g in 0 ..< n:
+    w.putI32(int32(g)); w.putI32(int32(g)); w.putI32(-1); w.putI32(1); w.putI32(0)
+
+  # visuals: deprecVersion, count, then one visual per group. Node indices:
+  # visual g = 1+2*g, its vertex stream = 2+2*g (index buffers are inline).
+  w.putI32(10)                    # deprec version
+  w.putI32(int32(n))              # count
+  for g in 0 ..< n:
+    w.writeVisual(mesh, groups[g].tris, int32(1 + 2*g))
+
   # outer tail
   w.putI32(0)                     # materialIds[]
-  w.putI32(int32(materials.len))  # customMaterials count
+  w.putI32(int32(n))              # customMaterials count
   w.putI32(-1)                    # skel ref (null)
   w.putI32(0)                     # lodMaxDistAtFov90[]
   w.putI32(1)                     # visCstType
   w.putI32(1)                     # hasPreLightGen
-  # PreLightGen lightmap scale = sqrt(totalWorldArea / totalLightmapUvArea), i.e.
-  # texel density: world surface area vs the area the atlas gives it. Each tri's
-  # lightmap area is half a usable cell = 0.5*(0.9/G)^2.
-  # PreLightGen scale = sqrt(totalWorldArea / totalLightmapUvArea). uvArea is
-  # SUMMED per triangle as 0.5*(c1.u-c0.u)*(c2.v-c0.v) over the passthrough
-  # lightmap UVs (the per-face atlas lays each triangle as a right triangle
-  # bl,br,tr) — the accumulation order is load-bearing for the float32 ULP.
+  # PreLightGen (model level): scale = sqrt(worldArea / uvArea) and the atlas box,
+  # aggregated over EVERY triangle across all groups. uvArea is summed per triangle
+  # as 0.5*(c1.u-c0.u)*(c2.v-c0.v) over the passthrough lightmap UVs (right-triangle
+  # cells); the accumulation order is load-bearing for the float32 ULP.
   var worldArea = 0.0'f32
   var uvArea = 0.0'f32
-  var lmMin = lm(tris[0].c0)
+  var lmMin = lm(groups[0].tris[0].c0)
   var lmMax = lmMin
-  for t in tris:
-    let cr = cross(sub(pos(t.c1), pos(t.c0)), sub(pos(t.c2), pos(t.c0)))
-    worldArea += 0.5'f32 * sqrt(cr[0]*cr[0] + cr[1]*cr[1] + cr[2]*cr[2])
-    let a = lm(t.c0); let b = lm(t.c1); let c = lm(t.c2)
-    uvArea += 0.5'f32 * (b[0] - a[0]) * (c[1] - a[1])
-    for cc in [t.c0, t.c1, t.c2]:
-      let u = lm(cc)
-      for k in 0 .. 1:
-        if u[k] < lmMin[k]: lmMin[k] = u[k]
-        if u[k] > lmMax[k]: lmMax[k] = u[k]
+  for grp in groups:
+    for t in grp.tris:
+      let cr = cross(sub(pos(t.c1), pos(t.c0)), sub(pos(t.c2), pos(t.c0)))
+      worldArea += 0.5'f32 * sqrt(cr[0]*cr[0] + cr[1]*cr[1] + cr[2]*cr[2])
+      let a = lm(t.c0); let b = lm(t.c1); let c = lm(t.c2)
+      uvArea += 0.5'f32 * (b[0] - a[0]) * (c[1] - a[1])
+      for cc in [t.c0, t.c1, t.c2]:
+        let u = lm(cc)
+        for k in 0 .. 1:
+          if u[k] < lmMin[k]: lmMin[k] = u[k]
+          if u[k] > lmMax[k]: lmMax[k] = u[k]
   let plgScale = sqrt(worldArea / uvArea)
-  # PreLightGen
   w.putI32(1)                     # version
   w.putI32(1)                     # int
   w.putF32(plgScale)              # lightmap scale
@@ -283,9 +298,9 @@ proc buildMeshBody*(mesh: FbxMesh, materials: seq[MeshMaterial],
   w.putI32(1)                     # U05
   w.putStr(sourceTag)             # U06 (source path)
   w.putI32(1)                     # U07
-  # customMaterials array: one CPlugMaterialUserInst per material. Single-material
-  # mesh has nodeIndex 3 (visual=1, vertexStream=2, matInst=3).
-  w.writeMaterialNode(materials[0], 3)
+  # customMaterials: one CPlugMaterialUserInst per group, node index 1+2*n+g.
+  for g in 0 ..< n:
+    w.writeMaterialNode(materialFor(groups[g].mat), int32(1 + 2*n + g))
   # constant model tail: joints[], U10-U13, U14 ref(null), U15/U16=1.0, U17 id,
   # U18, then the skippable fake-occlusion chunk 0x090BB002 (empty) + node FACADE.
   w.putI32(0)                     # joints[]
@@ -312,10 +327,15 @@ const meshUserData = @[
   0x04'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x05'u8, 0x00'u8, 0x00'u8, 0x00'u8,
 ]
 
-proc meshInfo*(): GbxInfo =
+proc meshNodeCount*(mesh: FbxMesh): int =
+  ## Total GBX nodes: the model (1) + one visual + one vertex stream + one material
+  ## node per material group = 1 + 3*N. Index buffers are inline (not counted).
+  1 + 3 * triGroups(mesh).len
+
+proc meshInfo*(numNodes: int): GbxInfo =
   ## Header/framing for a .Mesh.Gbx, matching the NadeoImporter goldens: GBX v6,
   ## binary, uncompressed ref table, LZO body, CPlugSolid2Model, 16-byte header
-  ## user data, 4 nodes. Header bytes are byte-identical to the goldens.
+  ## user data. `numNodes` = meshNodeCount(mesh). Header bytes are byte-identical.
   GbxInfo(
     version: 6,
     format: 'B',
@@ -325,7 +345,7 @@ proc meshInfo*(): GbxInfo =
     classId: 0x090BB000'u32,
     userDataLen: 16,
     userData: meshUserData,
-    numNodes: 4,
+    numNodes: numNodes,
     numExternalNodes: 0)
 
 proc buildMeshGbx*(mesh: FbxMesh, materials: seq[MeshMaterial],
@@ -333,8 +353,10 @@ proc buildMeshGbx*(mesh: FbxMesh, materials: seq[MeshMaterial],
   ## Full .Mesh.Gbx file bytes (header + framing + LZO-compressed body). The LZO
   ## bytes differ from Nadeo's (LZO1X-1 vs -999) but decompress to the byte-identical
   ## body; the game reads the decompressed content. See [[shape-body-solved]].
-  writeGbx(meshInfo(), buildMeshBody(mesh, materials, fileWriteTime, sourceTag))
+  writeGbx(meshInfo(meshNodeCount(mesh)),
+           buildMeshBody(mesh, materials, fileWriteTime, sourceTag))
 
 proc saveMeshGbx*(path: string, mesh: FbxMesh, materials: seq[MeshMaterial],
                   fileWriteTime: int64, sourceTag: string) =
-  saveGbx(path, meshInfo(), buildMeshBody(mesh, materials, fileWriteTime, sourceTag))
+  saveGbx(path, meshInfo(meshNodeCount(mesh)),
+          buildMeshBody(mesh, materials, fileWriteTime, sourceTag))

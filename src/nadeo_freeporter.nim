@@ -126,10 +126,6 @@ proc run(mode: Mode, path: string): int =
     echo "  meshparams: ", (if fileExists(mpPath): mpPath else: "(default)")
     for mat in mats:
       echo "    ", mat.name, " -> ", mat.link, " (physics ", mat.physicsId, ")"
-    if mats.len != 1:
-      stderr.writeLine "nadeo-freeporter: multi-material meshes not yet supported (" &
-        $mats.len & " materials); per-material visual grouping is the next step."
-      return 2
 
     # Emit both the .Shape.Gbx (collision) and the .Mesh.Gbx (render mesh).
     discard writeShapeFor(path, m)

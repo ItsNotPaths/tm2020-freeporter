@@ -58,9 +58,6 @@ for n in fixtures:
   # Material binding: the fixture's MeshParams.xml if present, else the default.
   let mpPath = "tests/gen/out/" & n & ".MeshParams.xml"
   let mats = (if fileExists(mpPath): parseMeshParams(mpPath) else: defaultMaterials())
-  if mats.len > 1:
-    echo n, ": SKIP (multi-material; per-material visual grouping not yet built)"
-    continue
 
   # Locate the two non-geometric fields by diffing our own builds.
   let ftOff = firstDiff(buildMeshBody(mesh, mats, 0, ""), buildMeshBody(mesh, mats, 1, ""))
