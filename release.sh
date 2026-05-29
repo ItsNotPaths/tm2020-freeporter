@@ -4,6 +4,7 @@ set -euo pipefail
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_NAME="$(basename "$PROJECT_DIR")"
 RELEASE_DIR="$(cd "$PROJECT_DIR/.." && pwd)/${PROJECT_NAME}-release"
+ENTRY="$PROJECT_DIR/src/nadeo_freeporter.nim"
 
 usage() {
     cat <<EOF
@@ -14,6 +15,13 @@ usage: $(basename "$0") [--local] [--public --version vX.Y.Z [--notes "text"]]
   --version <tag>       required when --public is used
   --notes <text>        optional release notes
 EOF
+}
+
+# nadeo-freeporter is a self-contained CLI — no vendored build deps. Build the
+# binary into $1.
+build_nim() {
+    local out="$1"
+    ( cd "$PROJECT_DIR" && nim c -d:release --opt:speed -o:"$out" "$ENTRY" )
 }
 
 DO_LOCAL=0
@@ -41,7 +49,7 @@ if [ $DO_LOCAL -eq 1 ]; then
     echo "==> Local build: $PROJECT_NAME -> $RELEASE_DIR"
     rm -rf "$RELEASE_DIR"
     mkdir -p "$RELEASE_DIR"
-odin build "$PROJECT_DIR/src" -out:"$RELEASE_DIR/$PROJECT_NAME" -o:speed
+    build_nim "$RELEASE_DIR/$PROJECT_NAME"
     [ -f "$PROJECT_DIR/README.md" ] && cp "$PROJECT_DIR/README.md" "$RELEASE_DIR/" || true
     [ -f "$PROJECT_DIR/LICENSE" ]   && cp "$PROJECT_DIR/LICENSE"   "$RELEASE_DIR/" || true
     echo "==> Local done: $RELEASE_DIR"

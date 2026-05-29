@@ -1,2 +1,5 @@
 vendor/
 resources.txt
+tests/fixtures/
+tests/golden/
+todo.md

@@ -23,39 +23,21 @@ env:
 jobs:
   build-linux:
     runs-on: ubuntu-latest
-    # TODO: if you need an older glibc floor, switch to a container like:
-    #   container: ubuntu:20.04
     steps:
       - uses: actions/checkout@v4
 
-      - name: Cache vendor/
-        uses: actions/cache@v4
+      - name: Install Nim
+        uses: jiro4989/setup-nim-action@v2
         with:
-          path: vendor
-          key: vendor-linux-${{ hashFiles('download-deps.sh') }}
-
-      - name: Download deps
-        run: |
-          chmod +x ./download-deps.sh
-          ./download-deps.sh
-
-      - name: Install toolchain
-        uses: laytan/setup-odin@v2
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          nim-version: 'stable'
 
       - name: Build
-        run: |
-          # TODO: tune for your project (extra collections, vendor includes, etc.)
-          odin build src -out:"$PROJECT_NAME" -o:speed
-          strip --strip-all "$PROJECT_NAME"
+        run: nim c -d:release --opt:speed -o:"$PROJECT_NAME" src/nadeo_freeporter.nim
 
       - name: Stage artifacts
         run: |
           mkdir -p dist
-          # TODO: copy the files you want in the linux release into dist/
-          [ -f "$PROJECT_NAME" ] && cp "$PROJECT_NAME" dist/ || true
-          [ -d dist-stage ] && cp -r dist-stage/. dist/ || true
+          cp "$PROJECT_NAME" dist/
           [ -f README.md ] && cp README.md dist/ || true
           [ -f LICENSE ] && cp LICENSE dist/ || true
 
@@ -65,37 +47,25 @@ jobs:
           path: dist
 
   build-windows:
-    runs-on: ubuntu-latest
+    # Native Windows runner — Nim + its bundled MinGW produce the .exe. The CLI
+    # has no GUI/OS deps, so a Windows build is a free bonus alongside Linux.
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Cache vendor/
-        uses: actions/cache@v4
+      - name: Install Nim
+        uses: jiro4989/setup-nim-action@v2
         with:
-          path: vendor
-          key: vendor-windows-${{ hashFiles('download-deps.sh') }}
-
-      - name: Download deps
-        run: |
-          chmod +x ./download-deps.sh
-          ./download-deps.sh
-
-      - name: Install toolchain
-        uses: laytan/setup-odin@v2
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          nim-version: 'stable'
 
       - name: Build
-        run: |
-          # TODO: tune for your project; Odin cross-compiles via -target
-          odin build src -target:windows_amd64 -out:"$PROJECT_NAME.exe" -o:speed
+        run: nim c -d:release --opt:speed -o:"$env:PROJECT_NAME.exe" src/nadeo_freeporter.nim
 
       - name: Stage artifacts
+        shell: bash
         run: |
           mkdir -p dist
-          # TODO: copy the files you want in the windows release into dist/
-          [ -f "${PROJECT_NAME}.exe" ] && cp "${PROJECT_NAME}.exe" dist/ || true
-          [ -d dist-stage ] && cp -r dist-stage/. dist/ || true
+          cp "${PROJECT_NAME}.exe" dist/
           [ -f README.md ] && cp README.md dist/ || true
           [ -f LICENSE ] && cp LICENSE dist/ || true
 
