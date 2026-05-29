@@ -69,6 +69,17 @@ proc readU32*(r: var GbxReader): uint32 =
 
 proc readI32*(r: var GbxReader): int32 = cast[int32](r.readU32())
 
+proc readU64*(r: var GbxReader): uint64 =
+  r.need(8)
+  result = 0
+  for i in 0 ..< 8:
+    result = result or (uint64(r.data[r.pos + i]) shl (8 * i))
+  r.pos += 8
+
+proc readI64*(r: var GbxReader): int64 = cast[int64](r.readU64())
+
+proc readF32*(r: var GbxReader): float32 = cast[float32](r.readU32())
+
 proc readBytes*(r: var GbxReader, n: int): seq[byte] =
   r.need(n)
   result = r.data[r.pos ..< r.pos + n]
@@ -88,27 +99,35 @@ proc readString*(r: var GbxReader): string =
   for i in 0 ..< n: result[i] = char(b[i])
 
 proc readId*(r: var GbxReader): string =
-  ## Lookback string. First call reads the id version (must be >= 3); then each
-  ## id is a u32: 0 = empty, bit30 set = new string follows, bit31 set =
-  ## back-reference into the table. (gbx-net GbxReader.ReadIdIndex/ReadIdAsString.)
+  ## Lookback string ("Id"). First call reads the id version (must be >= 3); then
+  ## each id is a u32 index, decoded exactly as gbx-net's
+  ## GbxReader.ReadIdIndex/ReadIdAsString:
+  ##   * 0xFFFFFFFF        -> empty (unassigned)
+  ##   * neither bit30 nor bit31 set -> a numeric/enum literal; the decimal text
+  ##     of the index itself is the id (e.g. a collection index)
+  ##   * low 30 bits == 0 (with a flag bit set) -> a new string follows; store it
+  ##   * low 30 bits != 0 -> back-reference into the stored table
   if r.idVersion < 0:
     r.idVersion = int(r.readI32())
     if r.idVersion < 3:
       raise newException(IOError, "unsupported Id version " & $r.idVersion)
   let index = r.readU32()
-  if index == 0:
+  if index == 0xFFFFFFFF'u32:
     return ""
-  if (index and 0x40000000'u32) != 0:
-    let s = r.readString()
-    r.idDict.add s
-    return s
-  if (index and 0xC0000000'u32) != 0:
+  let masked = index and 0xC0000000'u32
+  if masked != 0x40000000'u32 and masked != 0x80000000'u32:
+    # Not a lookback string at all — the index is a literal value.
+    return $index
+  if (index and 0x3FFFFFFF'u32) != 0:
+    # Back-reference into the table (stored strings are 1-based here).
     let refIndex = int(index and 0x3FFFFFFF'u32)
-    # Stored strings are 1-based in gbx-net's dict math.
     if refIndex >= 1 and refIndex <= r.idDict.len:
       return r.idDict[refIndex - 1]
     return ""
-  raise newException(IOError, "unsupported Id index 0x" & toHex(index))
+  # A fresh string follows; store it for later back-references.
+  let s = r.readString()
+  r.idDict.add s
+  return s
 
 proc toCompression(b: uint8): GbxCompression =
   case char(b)
@@ -201,6 +220,18 @@ proc putU32*(w: var GbxWriter, v: uint32) =
   w.buf.add uint8((v shr 24) and 0xFF)
 
 proc putI32*(w: var GbxWriter, v: int32) = w.putU32(cast[uint32](v))
+
+proc putU64*(w: var GbxWriter, v: uint64) =
+  for i in 0 ..< 8: w.buf.add uint8((v shr (8 * i)) and 0xFF)
+
+proc putI64*(w: var GbxWriter, v: int64) = w.putU64(cast[uint64](v))
+
+proc putF32*(w: var GbxWriter, v: float32) = w.putU32(cast[uint32](v))
+
+proc putStr*(w: var GbxWriter, s: string) =
+  ## Length-prefixed (int32) UTF-8 string, the inverse of readString.
+  w.putI32(int32(s.len))
+  for c in s: w.buf.add uint8(c)
 
 proc putBytes*(w: var GbxWriter, b: openArray[byte]) =
   for x in b: w.buf.add x

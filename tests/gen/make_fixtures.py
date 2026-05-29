@@ -60,15 +60,19 @@ def add_lightmap_uv(mesh):
             light.data[li].uv = corners[k % 4]
 
 
-def new_mesh_object(name, verts, faces, uvs=None):
+def new_mesh_object(name, verts, faces, uvs=None, smooth=False):
     """Create a mesh object from explicit verts (list of (x,y,z)) and faces
     (list of index tuples). uvs: optional per-loop (u,v) list matching the
-    flattened face-corner order."""
+    flattened face-corner order. smooth=True shades the mesh smooth (averaged
+    per-vertex normals) instead of flat per-face normals."""
     mesh = bpy.data.meshes.new(name)
     obj = bpy.data.objects.new(name, mesh)
     bpy.context.scene.collection.objects.link(obj)
 
     mesh.from_pydata(verts, [], faces)
+    if smooth:
+        for poly in mesh.polygons:
+            poly.use_smooth = True
     mesh.update()
 
     # Base UV layer — must be named "BaseMaterial" (NadeoImporter looks for it
@@ -170,6 +174,66 @@ def fixture_triangle_shifted(d):
     export_fbx(os.path.join(d, "04_triangle_shifted.fbx"))
 
 
+def fixture_smooth_cube(d):
+    # Same geometry as 03_unit_cube but SMOOTH-shaded — averaged per-vertex
+    # normals instead of per-face. Tests whether NadeoImporter shares render
+    # verts when smoothing makes corner normals match, or still explodes (3
+    # verts/triangle) because the per-triangle lightmap atlas forces unique UVs.
+    reset_scene()
+    v = [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0),
+         (0, 0, 1), (1, 0, 1), (1, 1, 1), (0, 1, 1)]
+    f = [(0, 1, 2), (0, 2, 3), (4, 6, 5), (4, 7, 6),
+         (0, 5, 1), (0, 4, 5), (1, 6, 2), (1, 5, 6),
+         (2, 7, 3), (2, 6, 7), (3, 4, 0), (3, 7, 4)]
+    uvs = [(0.0, 0.0) for face in f for _ in face]
+    obj = new_mesh_object("scube", v, f, uvs, smooth=True)
+    assign_material(obj, "Mat0")
+    export_fbx(os.path.join(d, "05_smooth_cube.fbx"))
+
+
+def fixture_tilted_triangle(d):
+    # A triangle whose normal is NOT axis-aligned (vertex 2 lifted in Z), with
+    # real UVs — exercises the general UV-gradient tangent path beyond the
+    # axis-aligned cases the cube covered.
+    reset_scene()
+    verts = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 1.0)]
+    faces = [(0, 1, 2)]
+    uvs = [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0)]
+    obj = new_mesh_object("tilt", verts, faces, uvs)
+    assign_material(obj, "Mat0")
+    export_fbx(os.path.join(d, "06_tilted_triangle.fbx"))
+
+
+def fixture_tilted_degenerate(d):
+    # Same tilted geometry as 06 but DEGENERATE UVs (all 0,0) — exercises the
+    # geometric tangent fallback for a non-axis-aligned normal.
+    reset_scene()
+    verts = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 1.0)]
+    faces = [(0, 1, 2)]
+    uvs = [(0.0, 0.0), (0.0, 0.0), (0.0, 0.0)]
+    obj = new_mesh_object("tiltdeg", verts, faces, uvs)
+    assign_material(obj, "Mat0")
+    export_fbx(os.path.join(d, "07_tilted_degenerate.fbx"))
+
+
+def fixture_tri_fan(d, n, fname):
+    # n independent triangles spaced along X — tests the lightmap grid growth
+    # (G=ceil(sqrt(n))) and row packing for non-square triangle counts.
+    reset_scene()
+    verts = []
+    faces = []
+    uvs = []
+    for i in range(n):
+        base = len(verts)
+        x = i * 1.5
+        verts += [(x, 0.0, 0.0), (x + 1.0, 0.0, 0.0), (x, 1.0, 0.0)]
+        faces.append((base, base + 1, base + 2))
+        uvs += [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0)]
+    obj = new_mesh_object("fan%d" % n, verts, faces, uvs)
+    assign_material(obj, "Mat0")
+    export_fbx(os.path.join(d, fname))
+
+
 def main():
     d = out_dir()
     os.makedirs(d, exist_ok=True)
@@ -177,6 +241,12 @@ def main():
     fixture_two_triangles(d)
     fixture_unit_cube(d)
     fixture_triangle_shifted(d)
+    fixture_smooth_cube(d)
+    fixture_tilted_triangle(d)
+    fixture_tilted_degenerate(d)
+    fixture_tri_fan(d, 3, "08_tri3.fbx")
+    fixture_tri_fan(d, 5, "09_tri5.fbx")
+    fixture_tri_fan(d, 7, "10_tri7.fbx")
     print("FIXTURES_WRITTEN:", d)
 
 

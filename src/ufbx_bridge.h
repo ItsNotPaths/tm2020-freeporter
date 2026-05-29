@@ -48,6 +48,9 @@ typedef struct {
     uint32_t  *corner_position;  /* num_corners: index into positions */
     float     *corner_normal;    /* 3 * num_corners */
     float     *corner_uv;        /* 2 * num_corners (UV set 0; 0,0 if absent) */
+    float     *corner_uv2;       /* 2 * num_corners (UV set 1 / lightmap; 0,0 if absent) */
+    float     *corner_tangent;   /* 3 * num_corners (UV set 0 tangent; 0 if absent) */
+    float     *corner_bitangent; /* 3 * num_corners (UV set 0 bitangent; 0 if absent) */
 
     size_t     num_faces;
     uint32_t  *face_first;       /* num_faces */

@@ -54,6 +54,9 @@ type
     corner_position: ptr UncheckedArray[uint32]
     corner_normal: ptr UncheckedArray[cfloat]
     corner_uv: ptr UncheckedArray[cfloat]
+    corner_uv2: ptr UncheckedArray[cfloat]
+    corner_tangent: ptr UncheckedArray[cfloat]
+    corner_bitangent: ptr UncheckedArray[cfloat]
     num_faces: csize_t
     face_first: ptr UncheckedArray[uint32]
     face_count: ptr UncheckedArray[uint32]
@@ -73,10 +76,13 @@ type
     ## Whole-scene geometry, merged into one vertex/face soup. `positions` are
     ## unique control points (x,y,z triples). A "corner" is one face-vertex;
     ## `cornerPos` indexes `positions`, `cornerNormal`/`cornerUv` are per-corner.
-    positions*: seq[float32]    # 3 per position
-    cornerPos*: seq[int]        # 1 per corner -> index into positions
-    cornerNormal*: seq[float32] # 3 per corner
-    cornerUv*: seq[float32]     # 2 per corner
+    positions*: seq[float32]      # 3 per position
+    cornerPos*: seq[int]          # 1 per corner -> index into positions
+    cornerNormal*: seq[float32]   # 3 per corner
+    cornerUv*: seq[float32]       # 2 per corner (UV set 0 / base material)
+    cornerUv2*: seq[float32]      # 2 per corner (UV set 1 / lightmap)
+    cornerTangent*: seq[float32]  # 3 per corner (UV set 0 tangent)
+    cornerBitangent*: seq[float32] # 3 per corner (UV set 0 bitangent)
     faces*: seq[FbxFace]
     materials*: seq[string]
 
@@ -105,9 +111,17 @@ proc loadFbx*(path: string): tuple[ok: bool, error: string, mesh: FbxMesh] =
   m.cornerPos = newSeq[int](nc)
   m.cornerNormal = newSeq[float32](nc * 3)
   m.cornerUv = newSeq[float32](nc * 2)
+  m.cornerUv2 = newSeq[float32](nc * 2)
+  m.cornerTangent = newSeq[float32](nc * 3)
+  m.cornerBitangent = newSeq[float32](nc * 3)
   for i in 0 ..< nc: m.cornerPos[i] = int(c.corner_position[i])
-  for i in 0 ..< nc * 3: m.cornerNormal[i] = float32(c.corner_normal[i])
-  for i in 0 ..< nc * 2: m.cornerUv[i] = float32(c.corner_uv[i])
+  for i in 0 ..< nc * 3:
+    m.cornerNormal[i] = float32(c.corner_normal[i])
+    m.cornerTangent[i] = float32(c.corner_tangent[i])
+    m.cornerBitangent[i] = float32(c.corner_bitangent[i])
+  for i in 0 ..< nc * 2:
+    m.cornerUv[i] = float32(c.corner_uv[i])
+    m.cornerUv2[i] = float32(c.corner_uv2[i])
 
   let nf = int(c.num_faces)
   m.faces = newSeq[FbxFace](nf)

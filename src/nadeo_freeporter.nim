@@ -11,23 +11,42 @@
 ## CPlugSolid2Model -> CGameItemModel) lands in sibling modules as it comes
 ## online. This file is just the entry point / arg dispatch.
 
-import std/[os, strutils]
+import std/[os, strutils, times]
 import ufbx
 import gbx
+import shape
+import mesh
 
 const usageText = """
 nadeo-freeporter — Linux mesh -> TM2020 .Item.Gbx importer
 
 usage:
-  nadeo-freeporter mesh <path>     build a .Mesh.Gbx from a mesh file
+  nadeo-freeporter mesh <path>     build .Mesh.Gbx (+ .Shape.Gbx) from a mesh file
+  nadeo-freeporter shape <path>    build only the .Shape.Gbx (collision) from a mesh
   nadeo-freeporter item <path>     build a .Item.Gbx from a mesh file
   nadeo-freeporter gbx <path>      debug: parse a .Gbx and dump header + body
   nadeo-freeporter --help          show this help
 
-(scaffold: argument dispatch only; import pipeline not yet wired)
+(shape & mesh: byte-exact vs NadeoImporter on the fixture ladder; item in progress)
 """
 
-type Mode = enum mMesh, mItem, mGbx
+type Mode = enum mMesh, mItem, mGbx, mShape
+
+proc unixTimeToWinTime(unixSecs: int64): int64 =
+  ## Windows FILETIME: 100-nanosecond ticks since 1601-01-01 (Unix epoch is
+  ## 11644473600 s later). Used for CPlugSolid2Model's embedded fileWriteTime.
+  (unixSecs + 11644473600'i64) * 10_000_000'i64
+
+proc shapeOutPath(fbxPath: string): string =
+  ## "<dir>/<stem>.Shape.Gbx" next to the input, mirroring NadeoImporter naming.
+  let (dir, name, _) = splitFile(fbxPath)
+  dir / (name & ".Shape.Gbx")
+
+proc writeShapeFor(fbxPath: string, mesh: FbxMesh): int =
+  let outPath = shapeOutPath(fbxPath)
+  saveShapeGbx(outPath, mesh)
+  echo "wrote ", outPath
+  return 0
 
 proc hexDump(b: seq[byte], n: int): string =
   ## First `n` bytes as hex, space-separated, for a quick eyeball.
@@ -61,6 +80,13 @@ proc run(mode: Mode, path: string): int =
   if mode == mGbx:
     return runGbx(path)
 
+  if mode == mShape:
+    let (ok, err, m) = loadFbx(path)
+    if not ok:
+      stderr.writeLine "error: failed to read FBX '" & path & "': " & err
+      return 1
+    return writeShapeFor(path, m)
+
   if mode == mMesh:
     # Front-end smoke test: parse the FBX via ufbx and dump the extracted
     # geometry. (The .Mesh.Gbx / .Shape.Gbx writers are not wired yet.)
@@ -91,8 +117,17 @@ proc run(mode: Mode, path: string): int =
       echo "  bbox min:  ", lo[0], " ", lo[1], " ", lo[2]
       echo "  bbox max:  ", hi[0], " ", hi[1], " ", hi[2]
 
-    stderr.writeLine "nadeo-freeporter: .Mesh.Gbx writer not implemented yet."
-    return 2
+    # Emit both the .Shape.Gbx (collision) and the .Mesh.Gbx (render mesh).
+    discard writeShapeFor(path, m)
+    let (dir, name, _) = splitFile(path)
+    let meshPath = dir / (name & ".Mesh.Gbx")
+    # fileWriteTime is a Windows FILETIME (100ns ticks since 1601); sourceTag mirrors
+    # NadeoImporter's embedded source-path string. Both are non-geometric.
+    let ft = (unixTimeToWinTime(int64(epochTime())))
+    let sourceTag = "NadeoImporter Mesh Items\\" & name & ".fbx"
+    saveMeshGbx(meshPath, m, ft, sourceTag)
+    echo "wrote ", meshPath
+    return 0
 
   stderr.writeLine "nadeo-freeporter: Item import of '" & path &
     "' is not implemented yet."
@@ -105,12 +140,13 @@ proc main(): int =
     return (if args.len == 0: 1 else: 0)
 
   case args[0].toLowerAscii
-  of "mesh", "item", "gbx":
+  of "mesh", "shape", "item", "gbx":
     if args.len < 2:
       stderr.writeLine "error: '" & args[0] & "' needs a <path>"
       return 1
     let mode = case args[0].toLowerAscii
                of "mesh": mMesh
+               of "shape": mShape
                of "item": mItem
                else: mGbx
     return run(mode, args[1])

@@ -93,10 +93,14 @@ fp_fbx_mesh *fp_fbx_load(const char *path)
         alloc_ok &= out->positions != NULL;
     }
     if (total_corners) {
-        out->corner_position = (uint32_t *)calloc(total_corners, sizeof(uint32_t));
-        out->corner_normal   = (float *)calloc(total_corners * 3, sizeof(float));
-        out->corner_uv       = (float *)calloc(total_corners * 2, sizeof(float));
-        alloc_ok &= out->corner_position && out->corner_normal && out->corner_uv;
+        out->corner_position  = (uint32_t *)calloc(total_corners, sizeof(uint32_t));
+        out->corner_normal    = (float *)calloc(total_corners * 3, sizeof(float));
+        out->corner_uv        = (float *)calloc(total_corners * 2, sizeof(float));
+        out->corner_uv2       = (float *)calloc(total_corners * 2, sizeof(float));
+        out->corner_tangent   = (float *)calloc(total_corners * 3, sizeof(float));
+        out->corner_bitangent = (float *)calloc(total_corners * 3, sizeof(float));
+        alloc_ok &= out->corner_position && out->corner_normal && out->corner_uv &&
+                    out->corner_uv2 && out->corner_tangent && out->corner_bitangent;
     }
     if (total_faces) {
         out->face_first    = (uint32_t *)calloc(total_faces, sizeof(uint32_t));
@@ -126,6 +130,14 @@ fp_fbx_mesh *fp_fbx_load(const char *path)
         out->material_names[i] = buf; /* may be NULL on OOM; tolerated */
     }
 
+    /* FBX files store geometry in their own unit (Blender exports centimetres:
+     * a 1 m object is 100 file-units). NadeoImporter normalises to metres, so we
+     * scale positions by the file's unit-in-metres (0.01 for cm). Confirmed by
+     * differential RE: golden collision coords = our raw coords / 100. Only
+     * positions scale; normals (directions) and UVs (texture coords) do not. */
+    double unit_scale = scene->settings.unit_meters;
+    if (unit_scale == 0.0) unit_scale = 1.0;
+
     /* Second pass: fill. Track running offsets into the merged arrays. */
     size_t pos_base = 0;     /* position offset for the current mesh */
     size_t corner_off = 0;   /* next free corner slot */
@@ -138,13 +150,22 @@ fp_fbx_mesh *fp_fbx_load(const char *path)
         for (size_t v = 0; v < m->vertex_position.values.count; v++) {
             ufbx_vec3 p = m->vertex_position.values.data[v];
             float *dst = &out->positions[(pos_base + v) * 3];
-            dst[0] = (float)p.x;
-            dst[1] = (float)p.y;
-            dst[2] = (float)p.z;
+            dst[0] = (float)(p.x * unit_scale);
+            dst[1] = (float)(p.y * unit_scale);
+            dst[2] = (float)(p.z * unit_scale);
         }
 
         bool has_normal = m->vertex_normal.exists;
         bool has_uv = m->vertex_uv.exists;
+
+        /* UV set 0 carries the base UV + its tangent frame (use_tspace export);
+         * set 1 is the LightMap UV. NadeoImporter passes all of these through to
+         * the render mesh, so we extract them verbatim rather than recompute. */
+        ufbx_uv_set *set0 = m->uv_sets.count > 0 ? &m->uv_sets.data[0] : NULL;
+        ufbx_uv_set *set1 = m->uv_sets.count > 1 ? &m->uv_sets.data[1] : NULL;
+        bool has_uv2 = set1 && set1->vertex_uv.exists;
+        bool has_tan = set0 && set0->vertex_tangent.exists;
+        bool has_bitan = set0 && set0->vertex_bitangent.exists;
 
         for (size_t f = 0; f < m->num_faces; f++) {
             ufbx_face face = m->faces.data[f];
@@ -178,6 +199,21 @@ fp_fbx_mesh *fp_fbx_load(const char *path)
                     float *du = &out->corner_uv[corner_off * 2];
                     du[0] = (float)uv.x; du[1] = (float)uv.y;
                 }
+                if (has_uv2) {
+                    ufbx_vec2 uv = ufbx_get_vertex_vec2(&set1->vertex_uv, idx);
+                    float *du = &out->corner_uv2[corner_off * 2];
+                    du[0] = (float)uv.x; du[1] = (float)uv.y;
+                }
+                if (has_tan) {
+                    ufbx_vec3 t = ufbx_get_vertex_vec3(&set0->vertex_tangent, idx);
+                    float *dt = &out->corner_tangent[corner_off * 3];
+                    dt[0] = (float)t.x; dt[1] = (float)t.y; dt[2] = (float)t.z;
+                }
+                if (has_bitan) {
+                    ufbx_vec3 b = ufbx_get_vertex_vec3(&set0->vertex_bitangent, idx);
+                    float *db = &out->corner_bitangent[corner_off * 3];
+                    db[0] = (float)b.x; db[1] = (float)b.y; db[2] = (float)b.z;
+                }
                 corner_off++;
             }
         }
@@ -197,6 +233,9 @@ void fp_fbx_free(fp_fbx_mesh *m)
     free(m->corner_position);
     free(m->corner_normal);
     free(m->corner_uv);
+    free(m->corner_uv2);
+    free(m->corner_tangent);
+    free(m->corner_bitangent);
     free(m->face_first);
     free(m->face_count);
     free(m->face_material);
