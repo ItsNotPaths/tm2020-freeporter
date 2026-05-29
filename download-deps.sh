@@ -32,6 +32,26 @@ else
     echo "  done."
 fi
 
+echo "==> minilzo (LZO1X codec — Oberhumer C lib, linked into the Nim build)"
+# GBX bodies are LZO1X-compressed. We vendor Oberhumer's minilzo (the same
+# upstream gbx-net's C# MiniLZO was ported from) and bind it via src/lzo_bridge.c.
+# minilzo is 4 self-contained files: minilzo.c/.h, lzoconf.h, lzodefs.h.
+MINILZO_TARBALL="https://www.oberhumer.com/opensource/lzo/download/minilzo-2.10.tar.gz"
+if [ -f "$VENDOR/minilzo/minilzo.c" ]; then
+    echo "  already present: minilzo"
+else
+    mkdir -p "$VENDOR/minilzo"
+    tmp="$(mktemp -d)"
+    echo "  downloading minilzo-2.10..."
+    curl -fsSL "$MINILZO_TARBALL" -o "$tmp/minilzo.tar.gz"
+    tar -xzf "$tmp/minilzo.tar.gz" -C "$tmp"
+    cp "$tmp"/minilzo-*/minilzo.c "$tmp"/minilzo-*/minilzo.h \
+       "$tmp"/minilzo-*/lzoconf.h "$tmp"/minilzo-*/lzodefs.h \
+       "$tmp"/minilzo-*/COPYING "$VENDOR/minilzo/"
+    rm -rf "$tmp"
+    [ -f "$VENDOR/minilzo/minilzo.c" ] && echo "  done." || { echo "  error: minilzo extract failed" >&2; exit 1; }
+fi
+
 echo "==> NadeoImporterMaterialLib.txt (Nadeo material catalog)"
 # The material lib is a runtime data dependency: it maps material names ->
 # SurfaceId / GameplayId / UV layers. It ships inside Nadeo's official
