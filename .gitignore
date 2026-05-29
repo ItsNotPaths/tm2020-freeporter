@@ -5,4 +5,8 @@ tests/golden/
 todo.md
 .claude/
 nadeo-freeporter
+# compiled test binaries (the .nim sources are tracked)
 tests/lzo_roundtrip
+tests/roundtrip_gbx
+# generated FBX fixtures (the generator script is tracked)
+tests/gen/out/

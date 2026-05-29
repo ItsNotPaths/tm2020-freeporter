@@ -23,8 +23,10 @@ type
     unknownByte*: char
     classId*: uint32
     userDataLen*: int
+    userData*: seq[byte]     # raw user-data bytes (kept verbatim for re-emit)
     numNodes*: int
     numExternalNodes*: int
+    bodyStart*: int          # offset of first body byte (after framing)
     uncompressedBodySize*: int
     compressedBodySize*: int
 
@@ -129,12 +131,13 @@ proc parseHeader*(r: var GbxReader): GbxInfo =
 
   result.classId = r.readU32()
 
-  # User data (version >= 6): an int32 length, then that many bytes we skip for
-  # now (header chunks aren't needed to reach the body).
+  # User data (version >= 6): an int32 length, then that many bytes. We keep them
+  # verbatim (the header chunks aren't parsed yet, but must be preserved so a
+  # re-emit is byte-identical).
   if result.version >= 6:
     result.userDataLen = int(r.readI32())
     if result.userDataLen > 0:
-      r.skip(result.userDataLen)
+      result.userData = r.readBytes(result.userDataLen)
 
   result.numNodes = int(r.readI32())
 
@@ -143,6 +146,8 @@ proc parseHeader*(r: var GbxReader): GbxInfo =
   if result.numExternalNodes != 0:
     raise newException(IOError, "external reference tables not yet supported (" &
       $result.numExternalNodes & " nodes)")
+
+  result.bodyStart = r.pos
 
 proc readBody*(r: var GbxReader, info: var GbxInfo): seq[byte] =
   ## Read and (if needed) decompress the body. Returns the uncompressed bytes.
@@ -170,3 +175,84 @@ proc loadGbx*(path: string): tuple[info: GbxInfo, body: seq[byte]] =
   var info = r.parseHeader()
   let body = r.readBody(info)
   result = (info, body)
+
+# --- Writer ------------------------------------------------------------------
+# Little-endian writes into a growing seq[byte], mirroring the reader. The
+# header/framing layout is the exact inverse of parseHeader; the body is
+# (re)compressed with LZO1X-1 — a valid LZO1X stream the game decompresses, but
+# NOT byte-identical to Nadeo's LZO1X-999 output (see todo: bodies round-trip on
+# the *decompressed* content, not the compressed bytes).
+
+type GbxWriter* = object
+  buf*: seq[byte]
+
+proc initGbxWriter*(): GbxWriter = GbxWriter(buf: @[])
+
+proc putU8*(w: var GbxWriter, v: uint8) = w.buf.add v
+
+proc putU16*(w: var GbxWriter, v: uint16) =
+  w.buf.add uint8(v and 0xFF)
+  w.buf.add uint8((v shr 8) and 0xFF)
+
+proc putU32*(w: var GbxWriter, v: uint32) =
+  w.buf.add uint8(v and 0xFF)
+  w.buf.add uint8((v shr 8) and 0xFF)
+  w.buf.add uint8((v shr 16) and 0xFF)
+  w.buf.add uint8((v shr 24) and 0xFF)
+
+proc putI32*(w: var GbxWriter, v: int32) = w.putU32(cast[uint32](v))
+
+proc putBytes*(w: var GbxWriter, b: openArray[byte]) =
+  for x in b: w.buf.add x
+
+proc fromCompression(c: GbxCompression): uint8 =
+  case c
+  of gcCompressed: uint8('C')
+  of gcUncompressed: uint8('U')
+  else: raise newException(IOError, "cannot write unspecified compression")
+
+proc writeHeader*(w: var GbxWriter, info: GbxInfo) =
+  ## Header + framing, the exact inverse of parseHeader. Leaves the writer
+  ## positioned at the first body byte.
+  w.putBytes([byte('G'), byte('B'), byte('X')])
+  w.putU16(info.version)
+  w.putU8(uint8(info.format))
+  w.putU8(fromCompression(info.refTableCompression))
+  w.putU8(fromCompression(info.bodyCompression))
+  if info.version >= 4:
+    w.putU8(uint8(info.unknownByte))
+  w.putU32(info.classId)
+  if info.version >= 6:
+    w.putI32(int32(info.userData.len))
+    if info.userData.len > 0:
+      w.putBytes(info.userData)
+  w.putI32(int32(info.numNodes))
+  # Reference table: only the 0-node case is supported (matches the reader).
+  if info.numExternalNodes != 0:
+    raise newException(IOError, "writing external reference tables not supported")
+  w.putI32(0)
+
+proc writeGbx*(info: GbxInfo, body: seq[byte]): seq[byte] =
+  ## Serialize a full .Gbx: header + framing + (compressed) body.
+  var w = initGbxWriter()
+  w.writeHeader(info)
+  case info.bodyCompression
+  of gcCompressed:
+    let comp = lzoCompress(body)
+    w.putU32(uint32(body.len))   # uncompressed size
+    w.putU32(uint32(comp.len))   # compressed size
+    w.putBytes(comp)
+  of gcUncompressed:
+    w.putBytes(body)
+  else:
+    raise newException(IOError, "unknown body compression")
+  result = w.buf
+
+proc saveGbx*(path: string, info: GbxInfo, body: seq[byte]) =
+  ## Write a .Gbx to disk.
+  let bytes = writeGbx(info, body)
+  let s = newFileStream(path, fmWrite)
+  if s == nil:
+    raise newException(IOError, "cannot open for write: " & path)
+  defer: s.close()
+  s.writeData(unsafeAddr bytes[0], bytes.len)
