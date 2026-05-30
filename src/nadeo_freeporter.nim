@@ -17,6 +17,7 @@ import gbx
 import shape
 import mesh
 import item
+import seedmap
 import materials
 
 const usageText = """
@@ -26,6 +27,7 @@ usage:
   nadeo-freeporter mesh <path>     build .Mesh.Gbx (+ .Shape.Gbx) from a mesh file
   nadeo-freeporter shape <path>    build only the .Shape.Gbx (collision) from a mesh
   nadeo-freeporter item <path>     build a .Item.Gbx from a mesh file
+  nadeo-freeporter seedmap <out>   build a blank void .Map.Gbx (seed for placement)
   nadeo-freeporter gbx <path>      debug: parse a .Gbx and dump header + body
   nadeo-freeporter --help          show this help
 
@@ -174,6 +176,23 @@ proc main(): int =
     return (if args.len == 0: 1 else: 0)
 
   case args[0].toLowerAscii
+  of "seedmap":
+    # Unlike the other verbs, seedmap takes an OUTPUT path (no input file), so it
+    # bypasses run()'s fileExists check. Extra args are hex skippable-chunk ids to
+    # drop, e.g. `seedmap out.Map.Gbx 0x0304305B 0x03043048`.
+    if args.len < 2:
+      stderr.writeLine "error: 'seedmap' needs an <out path> [drop-chunk-id ...]"
+      return 1
+    var drop: seq[uint32] = @[]
+    for a in args[2 .. ^1]:
+      try: drop.add uint32(fromHex[uint64](a))
+      except ValueError:
+        stderr.writeLine "error: bad chunk id '" & a & "' (want hex, e.g. 0x0304305B)"
+        return 1
+    if drop.len == 0: drop = defaultDrops()
+    saveSeedMap(args[1], drop)
+    echo "wrote ", args[1], " (freeporter-branded, ", drop.len, " skippable chunks dropped)"
+    return 0
   of "mesh", "shape", "item", "gbx":
     if args.len < 2:
       stderr.writeLine "error: '" & args[0] & "' needs a <path>"
