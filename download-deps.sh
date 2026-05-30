@@ -9,8 +9,13 @@ set -euo pipefail
 VENDOR="$(cd "$(dirname "$0")" && pwd)/vendor"
 mkdir -p "$VENDOR"
 
+# Set DEPS_BUILD_ONLY=1 (CI does) to fetch only what the Nim build links/embeds
+# (ufbx, minilzo, the material lib) and skip the gbx-net reference clone, which is
+# C# documentation only — never compiled into the binary.
 echo "==> gbx-net (GBX format reference)"
-if [ -d "$VENDOR/gbx-net" ] && [ -n "$(ls -A "$VENDOR/gbx-net" 2>/dev/null)" ]; then
+if [ "${DEPS_BUILD_ONLY:-0}" = "1" ]; then
+    echo "  skipped (DEPS_BUILD_ONLY=1): reference-only, not needed to build"
+elif [ -d "$VENDOR/gbx-net" ] && [ -n "$(ls -A "$VENDOR/gbx-net" 2>/dev/null)" ]; then
     echo "  already present: gbx-net"
 else
     echo "  cloning gbx-net..."
@@ -69,8 +74,24 @@ else
     echo "  downloading NadeoImporter_${NADEO_VER}.zip..."
     curl -fsSL "$NADEO_URL" -o "$tmp/nadeo.zip"
     head -c2 "$tmp/nadeo.zip" | grep -q "PK" || { echo "  error: not a zip (bad URL / error page)" >&2; rm -rf "$tmp"; exit 1; }
-    # -j junks internal paths, -o overwrites; match the file wherever it sits in the zip.
-    unzip -o -j "$tmp/nadeo.zip" '*NadeoImporterMaterialLib.txt' -d "$VENDOR/nadeo" >/dev/null
+    # Extract just the .txt, junking internal paths. Prefer unzip (Linux); fall back
+    # to python (Windows CI bash often lacks unzip) so this works on every runner.
+    if command -v unzip >/dev/null 2>&1; then
+        unzip -o -j "$tmp/nadeo.zip" '*NadeoImporterMaterialLib.txt' -d "$VENDOR/nadeo" >/dev/null
+    else
+        PY="$(command -v python3 || command -v python || true)"
+        [ -n "$PY" ] || { echo "  error: need 'unzip' or 'python' to extract the lib" >&2; rm -rf "$tmp"; exit 1; }
+        "$PY" - "$tmp/nadeo.zip" "$VENDOR/nadeo" <<'PY'
+import sys, zipfile, os
+zf, dest = sys.argv[1], sys.argv[2]
+with zipfile.ZipFile(zf) as z:
+    for n in z.namelist():
+        if n.replace("\\", "/").endswith("NadeoImporterMaterialLib.txt"):
+            with z.open(n) as s, open(os.path.join(dest, "NadeoImporterMaterialLib.txt"), "wb") as o:
+                o.write(s.read())
+            break
+PY
+    fi
     rm -rf "$tmp"
     [ -f "$MATLIB" ] && echo "  done." || { echo "  error: txt not found in zip" >&2; exit 1; }
 fi

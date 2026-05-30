@@ -31,6 +31,9 @@ jobs:
         with:
           nim-version: 'stable'
 
+      - name: Fetch build deps
+        run: DEPS_BUILD_ONLY=1 ./download-deps.sh
+
       - name: Build
         run: nim c -d:release --opt:speed -o:"$PROJECT_NAME" src/nadeo_freeporter.nim
 
@@ -57,6 +60,10 @@ jobs:
         uses: jiro4989/setup-nim-action@v2
         with:
           nim-version: 'stable'
+
+      - name: Fetch build deps
+        shell: bash
+        run: DEPS_BUILD_ONLY=1 ./download-deps.sh
 
       - name: Build
         run: nim c -d:release --opt:speed -o:"$env:PROJECT_NAME.exe" src/nadeo_freeporter.nim
