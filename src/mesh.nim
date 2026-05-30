@@ -33,8 +33,8 @@ import gbx
 import ufbx
 import materials
 
-# 6 vertex DataDecls (Position Float3, Normal Dec3N, TexCoord0/1 Float2,
-# TangentU/V Dec3N) — geometry-independent, emitted verbatim.
+# 6 vertex DataDecls for 2-layer [BaseMaterial,Lightmap] materials (Position Float3,
+# Normal Dec3N, TexCoord0/1 Float2, TangentU/V Dec3N) — emitted verbatim.
 const dataDecls = [
   0x00'u8, 0x04'u8, 0xA0'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x05'u8, 0x1C'u8, 0xA0'u8, 0x10'u8,
   0x30'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x0C'u8, 0x00'u8, 0x0A'u8, 0x02'u8, 0xA0'u8, 0x20'u8,
@@ -42,6 +42,17 @@ const dataDecls = [
   0x60'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x18'u8, 0x00'u8, 0x12'u8, 0x1C'u8, 0xA0'u8, 0x10'u8,
   0x80'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x20'u8, 0x00'u8, 0x14'u8, 0x1C'u8, 0xA0'u8, 0x10'u8,
   0x90'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x24'u8, 0x00'u8,
+]
+
+# 3 vertex DataDecls for 1-layer materials (Position Float3, Normal Dec3N, a single
+# TexCoord0 Float2 — NO TexCoord1/Tangents). Byte-identical to the 2-layer block
+# with every usage byte 0xA0->0x60 and the last decl truncated by 4 B (the chain
+# link to a next decl). Extracted verbatim from the 14_mat_grass golden — see
+# memory `one-layer-vertex-format`.
+const dataDecls1 = [
+  0x00'u8, 0x04'u8, 0x60'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x05'u8, 0x1C'u8, 0x60'u8, 0x10'u8,
+  0x30'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x0C'u8, 0x00'u8, 0x0A'u8, 0x02'u8, 0x60'u8, 0x20'u8,
+  0x40'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x00'u8, 0x10'u8, 0x00'u8,
 ]
 
 const matFolder = "Stadium\\Media\\Material\\"
@@ -119,11 +130,18 @@ proc triGroups*(mesh: FbxMesh): seq[Group] =
           ts.add (f.first, f.first + k, f.first + k + 1)
     if ts.len > 0: result.add (slot, ts)
 
-proc writeVisual(w: var GbxWriter, mesh: FbxMesh, tris: seq[Tri], nodeIndex: int32) =
+proc writeVisual(w: var GbxWriter, mesh: FbxMesh, tris: seq[Tri], nodeIndex: int32,
+                 mat: MeshMaterial) =
   ## Emit one CPlugVisualIndexedTriangles node-ref (+ its CPlugVertexStream and
   ## inline CPlugIndexBuffer) for `tris`. The vertex stream is node `nodeIndex+1`.
   ## All vertex attributes are passthrough; verts are exploded (3 per triangle),
   ## indices the identity 0..3k-1. See module doc.
+  ##
+  ## The vertex FORMAT is lib-driven (`mat.uvLayers`): 2-layer materials get 6 decls
+  ## (Pos/Normal/TexCoord0/TexCoord1/TangentU/TangentV); 1-layer get 3 (Pos/Normal/
+  ## one TexCoord, no tangents). Each TexCoord is sourced by layer NAME —
+  ## BaseMaterial->uv set 0, Lightmap->uv set 1 (so a Lightmap-only material's single
+  ## TexCoord is the lightmap UV). See memory `one-layer-vertex-format`.
   let nVerts = tris.len * 3
   proc pos(c: int): Vec3 =
     let p = mesh.cornerPos[c]
@@ -159,24 +177,28 @@ proc writeVisual(w: var GbxWriter, mesh: FbxMesh, tris: seq[Tri], nodeIndex: int
   w.putI32(int32(nVerts))         # count
   w.putU32(3'u32)                 # flags
   w.putI32(-1)                    # streamModel ref (null)
-  w.putI32(6)                     # DataDecl count
-  w.putBytes(dataDecls)
+  let layers = mat.uvLayers
+  doAssert layers.len in {1, 2}, "material '" & mat.link &
+    "' has unexpected UV-layer count " & $layers.len
+  let twoLayer = layers.len == 2
+  if twoLayer: (w.putI32(6); w.putBytes(dataDecls))      # DataDecls
+  else:        (w.putI32(3); w.putBytes(dataDecls1))
   w.putI32(1)                     # VStream bool
   for t in tris:                  # Positions
     for c in [t.c0, t.c1, t.c2]:
       let p = pos(c); w.putF32(p[0]); w.putF32(p[1]); w.putF32(p[2])
   for t in tris:                  # Normals (Dec3N)
     for c in [t.c0, t.c1, t.c2]: w.putDec3N(nrm(c))
-  for t in tris:                  # TexCoord0 (authored UV)
-    for c in [t.c0, t.c1, t.c2]:
-      let a = uv(c); w.putF32(a[0]); w.putF32(a[1])
-  for t in tris:                  # TexCoord1 (lightmap UV, passthrough)
-    for c in [t.c0, t.c1, t.c2]:
-      let a = lm(c); w.putF32(a[0]); w.putF32(a[1])
-  for t in tris:                  # TangentU (Dec3N, passthrough)
-    for c in [t.c0, t.c1, t.c2]: w.putDec3N(tan(c))
-  for t in tris:                  # TangentV (Dec3N, passthrough)
-    for c in [t.c0, t.c1, t.c2]: w.putDec3N(bitan(c))
+  for layer in layers:            # one TexCoord per UV layer, sourced by NAME
+    for t in tris:
+      for c in [t.c0, t.c1, t.c2]:
+        let a = (if layer == "BaseMaterial": uv(c) else: lm(c))
+        w.putF32(a[0]); w.putF32(a[1])
+  if twoLayer:                    # tangents only for 2-layer materials
+    for t in tris:                # TangentU (Dec3N, passthrough)
+      for c in [t.c0, t.c1, t.c2]: w.putDec3N(tan(c))
+    for t in tris:                # TangentV (Dec3N, passthrough)
+      for c in [t.c0, t.c1, t.c2]: w.putDec3N(bitan(c))
   w.putU32(0xFACADE01'u32)        # end CPlugVertexStream node
   # Bounding box (center, halfSize) over this group's positions.
   var lo = pos(tris[0].c0); var hi = lo
@@ -252,7 +274,8 @@ proc buildMeshBody*(mesh: FbxMesh, materials: seq[MeshMaterial],
   w.putI32(10)                    # deprec version
   w.putI32(int32(n))              # count
   for g in 0 ..< n:
-    w.writeVisual(mesh, groups[g].tris, int32(nodeBase + 1 + 2*g))
+    w.writeVisual(mesh, groups[g].tris, int32(nodeBase + 1 + 2*g),
+                  materialFor(groups[g].mat))
 
   # outer tail
   w.putI32(0)                     # materialIds[]

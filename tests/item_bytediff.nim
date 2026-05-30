@@ -22,7 +22,8 @@ import "../src/materials"
 const fixtures = ["01_triangle", "02_two_triangles", "03_unit_cube", "04_triangle_shifted",
                   "05_smooth_cube", "06_tilted_triangle", "07_tilted_degenerate",
                   "08_tri3", "09_tri5", "10_tri7",
-                  "11_mat_link", "12_mat_physics", "13_two_materials"]
+                  "11_mat_link", "12_mat_physics", "13_two_materials",
+                  "14_mat_grass"]
 const uvless = ["03_unit_cube", "05_smooth_cube", "07_tilted_degenerate"]
 const author = "nadeo-freeporter"
 const collection = "Stadium"

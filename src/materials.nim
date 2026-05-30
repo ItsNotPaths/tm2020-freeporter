@@ -37,11 +37,36 @@ const gameplayIds = [
   "ReactorBoost2_Oriented", "VehicleTransform_Reset", "VehicleTransform_CarSnow",
   "VehicleTransform_CarRally", "VehicleTransform_CarDesert"]
 
+# The Nadeo material catalog, embedded at COMPILE time (staticRead) so the binary
+# has no runtime dependency on the .txt. Each material's ordered DUvLayer list
+# determines the per-material vertex format (decl list / tangents) — see
+# `uvLayersForLink` and memory `one-layer-vertex-format`.
+const libText = staticRead("../vendor/nadeo/NadeoImporterMaterialLib.txt")
+
+proc uvLayersForLink*(link: string): seq[string] =
+  ## Ordered DUvLayer layer names for a stock material `Link` (e.g. RoadTech ->
+  ## @["BaseMaterial","Lightmap"], Grass -> @["Lightmap"]). Empty seq if the Link
+  ## is not in the lib. The lib has only 1- and 2-layer materials.
+  var inBlock = false
+  for rawLine in libText.splitLines():
+    let line = rawLine.strip()
+    if line.startsWith("DMaterial("):
+      let rp = line.find(')')
+      inBlock = rp > 0 and line[len("DMaterial(") ..< rp] == link
+    elif inBlock and line.startsWith("DUvLayer"):
+      let lp = line.find('(')
+      let rp = line.find(')')
+      if lp >= 0 and rp > lp:
+        let inner = line[lp+1 ..< rp]          # e.g. "BaseMaterial\t, 0"
+        let comma = inner.find(',')
+        result.add (if comma >= 0: inner[0 ..< comma] else: inner).strip()
+
 type MeshMaterial* = object
   name*: string        ## FBX material name -> CPlugMaterialUserInst MaterialName
   link*: string        ## stock material name -> Link
   physicsId*: uint8    ## SurfacePhysicId (MaterialId enum index)
   gameplayId*: uint8   ## SurfaceGameplayId (GameplayId enum index)
+  uvLayers*: seq[string] ## ordered DUvLayer names from the lib (drives vertex format)
 
 proc enumIndex(table: openArray[string], name, what: string): uint8 =
   for i, n in table:
@@ -62,16 +87,19 @@ proc parseMeshParams*(path: string): seq[MeshMaterial] =
     for m in mats.findAll("Material"):
       let phys = m.attr("PhysicsId")
       let gp = m.attr("GameplayId")
+      let link = m.attr("Link")
       result.add MeshMaterial(
         name: m.attr("Name"),
-        link: m.attr("Link"),
+        link: link,
         physicsId: (if phys.len > 0: surfacePhysicId(phys) else: 0'u8),
-        gameplayId: (if gp.len > 0: enumIndex(gameplayIds, gp, "GameplayId") else: 0'u8))
+        gameplayId: (if gp.len > 0: enumIndex(gameplayIds, gp, "GameplayId") else: 0'u8),
+        uvLayers: uvLayersForLink(link))
 
 proc defaultMaterials*(): seq[MeshMaterial] =
   ## The fixture default (Mat0 -> PlatformTech / Asphalt) when no MeshParams exists.
   @[MeshMaterial(name: "Mat0", link: "PlatformTech",
-                 physicsId: surfacePhysicId("Asphalt"), gameplayId: 0'u8)]
+                 physicsId: surfacePhysicId("Asphalt"), gameplayId: 0'u8,
+                 uvLayers: uvLayersForLink("PlatformTech"))]
 
 type ItemParams* = object
   author*: string         ## <Item AuthorName=> -> collector ident author
