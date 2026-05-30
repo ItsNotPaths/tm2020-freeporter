@@ -19,15 +19,6 @@ nadeo-freeporter item  <file.fbx>   # -> .Item.Gbx (reads sibling .Item.xml + .M
 nadeo-freeporter gbx   <file.Gbx>   # debug: parse + dump a .Gbx
 ```
 
-## Status
-
-Byte-exact vs NadeoImporter and game-accepted for **static items, stock 2-UV-layer
-materials, real UVs** (single + multi-material). Output is valid GBX (LZO body, the game
-loads it).
-
-Not done: custom-texture materials, lib-driven vertex format for ≠2-UV-layer materials,
-exact tangent computation, trigger/non-Static variants. See `todo.md` (gaps G1–G5).
-
 ## Tests
 
 ```sh
