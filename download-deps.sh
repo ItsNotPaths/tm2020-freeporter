@@ -74,24 +74,31 @@ else
     echo "  downloading NadeoImporter_${NADEO_VER}.zip..."
     curl -fsSL "$NADEO_URL" -o "$tmp/nadeo.zip"
     head -c2 "$tmp/nadeo.zip" | grep -q "PK" || { echo "  error: not a zip (bad URL / error page)" >&2; rm -rf "$tmp"; exit 1; }
-    # Extract just the .txt, junking internal paths. Prefer unzip (Linux); fall back
-    # to python (Windows CI bash often lacks unzip) so this works on every runner.
-    if command -v unzip >/dev/null 2>&1; then
-        unzip -o -j "$tmp/nadeo.zip" '*NadeoImporterMaterialLib.txt' -d "$VENDOR/nadeo" >/dev/null
-    else
-        PY="$(command -v python3 || command -v python || true)"
-        [ -n "$PY" ] || { echo "  error: need 'unzip' or 'python' to extract the lib" >&2; rm -rf "$tmp"; exit 1; }
-        "$PY" - "$tmp/nadeo.zip" "$VENDOR/nadeo" <<'PY'
+    # Extract just the .txt, flat. Prefer python (exact member match, present on all
+    # CI runners + dev machines); unzip's leading-'*' glob matches nothing on Windows
+    # Info-ZIP, so it's only a fallback when python is unavailable.
+    extracted=0
+    PY="$(command -v python3 || command -v python || true)"
+    if [ -n "$PY" ]; then
+        if "$PY" - "$tmp/nadeo.zip" "$VENDOR/nadeo" <<'PY'
 import sys, zipfile, os
 zf, dest = sys.argv[1], sys.argv[2]
+ok = False
 with zipfile.ZipFile(zf) as z:
     for n in z.namelist():
-        if n.replace("\\", "/").endswith("NadeoImporterMaterialLib.txt"):
+        if n.replace("\\", "/").rstrip("/").endswith("NadeoImporterMaterialLib.txt"):
             with z.open(n) as s, open(os.path.join(dest, "NadeoImporterMaterialLib.txt"), "wb") as o:
                 o.write(s.read())
+            ok = True
             break
+sys.exit(0 if ok else 1)
 PY
+        then extracted=1; fi
     fi
+    if [ "$extracted" != "1" ] && command -v unzip >/dev/null 2>&1; then
+        unzip -o -j "$tmp/nadeo.zip" '*NadeoImporterMaterialLib.txt' -d "$VENDOR/nadeo" >/dev/null && extracted=1
+    fi
+    [ "$extracted" = "1" ] || { echo "  error: could not extract the lib (need python or unzip)" >&2; rm -rf "$tmp"; exit 1; }
     rm -rf "$tmp"
     [ -f "$MATLIB" ] && echo "  done." || { echo "  error: txt not found in zip" >&2; exit 1; }
 fi
