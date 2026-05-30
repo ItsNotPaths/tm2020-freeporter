@@ -297,6 +297,23 @@ def fixture_two_materials(d):
                       ("Mat1", "RoadTech", "Dirt")])
 
 
+def fixture_mat_grass(d):
+    # Triangle (real UVs), geometrically IDENTICAL to 01_triangle, but Link=Grass
+    # — a 1-LAYER material ([Lightmap] only) vs PlatformTech's 2-layer
+    # [BaseMaterial,Lightmap]. Diffing this golden's Mesh body against
+    # 01_triangle's isolates the 1-layer vertex format: decl-list (3 decls vs 6),
+    # the CPlugVertexStream flag byte (0x60 vs 0xA0 observed), and which FBX UV
+    # set feeds TexCoord0. PhysicsId=Grass (MaterialId enum) to match the Link.
+    reset_scene()
+    verts = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)]
+    faces = [(0, 1, 2)]
+    uvs = [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0)]
+    obj = new_mesh_object("tri", verts, faces, uvs)
+    assign_material(obj, "Mat0")
+    export_fbx(os.path.join(d, "14_mat_grass.fbx"))
+    write_meshparams(d, "14_mat_grass", [("Mat0", "Grass", "Grass")])
+
+
 def main():
     d = out_dir()
     os.makedirs(d, exist_ok=True)
@@ -313,6 +330,7 @@ def main():
     fixture_mat_link(d)
     fixture_mat_physics(d)
     fixture_two_materials(d)
+    fixture_mat_grass(d)
     print("FIXTURES_WRITTEN:", d)
 
 
