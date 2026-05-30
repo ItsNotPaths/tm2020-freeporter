@@ -87,6 +87,10 @@ jobs:
     permissions:
       contents: write
     steps:
+      # Needed so `gh release create` can resolve the repo (it shells out to git)
+      # and so the new tag points at the commit this run was dispatched from.
+      - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
           name: linux-zip
@@ -113,6 +117,7 @@ jobs:
           gh release create "${{ inputs.version }}" \
               "${PROJECT_NAME}-linux.zip" \
               "${PROJECT_NAME}-windows.zip" \
+              --target "${{ github.sha }}" \
               --title "${{ inputs.version }}" \
               --notes "${{ inputs.notes }}" \
               $PRERELEASE_FLAG
