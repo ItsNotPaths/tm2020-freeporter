@@ -14,3 +14,6 @@ tests/roundtrip_gbx
 tests/gen/out/
 tests/gen/golden/
 tests/probe_diff
+# dev tools: the .nim sources are tracked; ignore compiled binaries
+tools/dissect_map
+tools/extract_map

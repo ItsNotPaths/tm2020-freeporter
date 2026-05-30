@@ -236,6 +236,17 @@ proc putStr*(w: var GbxWriter, s: string) =
 proc putBytes*(w: var GbxWriter, b: openArray[byte]) =
   for x in b: w.buf.add x
 
+# --- Id ("lookback string") writers. The id-version int32 (>=3) must be emitted
+# once by the caller before the first Id in a given Id scope (a fresh body, or a
+# fresh encapsulated block, which resets the heap). These always write a *fresh*
+# string (flag 0x40000000), never a back-reference: position-independent and
+# self-consistent, just not deduped. item.nim has private copies of these. ---
+proc putIdEmpty*(w: var GbxWriter) = w.putU32(0xFFFFFFFF'u32)
+proc putIdString*(w: var GbxWriter, s: string) =
+  if s.len == 0: w.putIdEmpty()
+  else: (w.putU32(0x40000000'u32); w.putStr(s))
+proc putIdLiteral*(w: var GbxWriter, v: uint32) = w.putU32(v)
+
 proc fromCompression(c: GbxCompression): uint8 =
   case c
   of gcCompressed: uint8('C')

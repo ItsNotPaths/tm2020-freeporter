@@ -1,7 +1,8 @@
 # nadeo-freeporter
 
-Native Linux replacement for `NadeoImporter.exe` — turns a Blender-exported FBX into
-TrackMania 2020 `.Mesh.Gbx` / `.Shape.Gbx` / `.Item.Gbx`, no Wine. CLI, written in Nim.
+Native Linux replacement for `NadeoImporter.exe` *and* blendermania's .NET map tool —
+turns a Blender-exported FBX into TrackMania 2020 `.Mesh.Gbx` / `.Shape.Gbx` / `.Item.Gbx`,
+and places items into a `.Map.Gbx`, no Wine. CLI, written in Nim.
 
 ## Build
 
@@ -16,8 +17,12 @@ nimble build            # -> ./nadeo-freeporter
 nadeo-freeporter mesh  <file.fbx>   # -> .Mesh.Gbx + .Shape.Gbx (reads sibling .MeshParams.xml)
 nadeo-freeporter shape <file.fbx>   # -> .Shape.Gbx only
 nadeo-freeporter item  <file.fbx>   # -> .Item.Gbx (reads sibling .Item.xml + .MeshParams.xml)
+nadeo-freeporter seedmap <out.Gbx>  # -> blank grass-safe void .Map.Gbx
+nadeo-freeporter map   <cfg.json>   # -> place items into a .Map.Gbx (blendermania-dotnet payload)
 nadeo-freeporter gbx   <file.Gbx>   # debug: parse + dump a .Gbx
 ```
+
+`map` also accepts the `place-objects-on-map` verb (drop-in for blendermania-dotnet).
 
 ## Tests
 

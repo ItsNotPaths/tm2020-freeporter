@@ -19,6 +19,7 @@ import mesh
 import item
 import seedmap
 import materials
+import map as mapbuild
 
 const usageText = """
 nadeo-freeporter — Linux mesh -> TM2020 .Item.Gbx importer
@@ -28,6 +29,7 @@ usage:
   nadeo-freeporter shape <path>    build only the .Shape.Gbx (collision) from a mesh
   nadeo-freeporter item <path>     build a .Item.Gbx from a mesh file
   nadeo-freeporter seedmap <out>   build a blank void .Map.Gbx (seed for placement)
+  nadeo-freeporter map <config>    place items from a JSON config into a .Map.Gbx
   nadeo-freeporter gbx <path>      debug: parse a .Gbx and dump header + body
   nadeo-freeporter --help          show this help
 
@@ -75,6 +77,30 @@ proc runGbx(path: string): int =
     info.uncompressedBodySize, " bytes"
   echo "  body[0..31]:    ", hexDump(body, 32)
   return 0
+
+proc runMap(configPath: string): int =
+  ## `map` / `place-objects-on-map`: read a forzamania/blendermania-dotnet JSON config
+  ## and emit the placed .Map.Gbx. Exit codes match the dotnet helper's contract
+  ## (dotnet_runner.py): 0 ok, 2 GBX error, 3 invalid payload, 1 otherwise.
+  if not fileExists(configPath):
+    stderr.writeLine "ERROR: config not found: " & configPath
+    return 3
+  var cfg: mapbuild.MapConfig
+  try:
+    cfg = mapbuild.parseConfig(configPath)
+  except CatchableError as e:
+    stderr.writeLine "ERROR: invalid JSON payload: " & e.msg
+    return 3
+  if cfg.mapPath.len == 0:
+    stderr.writeLine "ERROR: invalid payload: MapPath is missing/empty"
+    return 3
+  try:
+    let outPath = mapbuild.buildMap(cfg)
+    echo "SUCCESS: wrote ", outPath, " (", cfg.items.len, " items placed)"
+    return 0
+  except CatchableError as e:
+    stderr.writeLine "ERROR: failed to write map: " & e.msg
+    return 2
 
 proc run(mode: Mode, path: string): int =
   if not fileExists(path):
@@ -193,6 +219,14 @@ proc main(): int =
     saveSeedMap(args[1], drop)
     echo "wrote ", args[1], " (freeporter-branded, ", drop.len, " skippable chunks dropped)"
     return 0
+  of "map", "place-objects-on-map":
+    # Native blendermania-dotnet replacement. `place-objects-on-map` is the verb its
+    # callers (forzamania's dotnet_runner) pass, so accepting it makes freeporter a
+    # drop-in binary swap; `map` is the short alias.
+    if args.len < 2:
+      stderr.writeLine "error: '" & args[0] & "' needs a <config.json>"
+      return 3
+    return runMap(args[1])
   of "mesh", "shape", "item", "gbx":
     if args.len < 2:
       stderr.writeLine "error: '" & args[0] & "' needs a <path>"
