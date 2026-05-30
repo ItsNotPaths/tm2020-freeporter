@@ -72,3 +72,22 @@ proc defaultMaterials*(): seq[MeshMaterial] =
   ## The fixture default (Mat0 -> PlatformTech / Asphalt) when no MeshParams exists.
   @[MeshMaterial(name: "Mat0", link: "PlatformTech",
                  physicsId: surfacePhysicId("Asphalt"), gameplayId: 0'u8)]
+
+type ItemParams* = object
+  author*: string         ## <Item AuthorName=> -> collector ident author
+  collection*: string     ## <Item Collection=> -> collector ident collection
+  itemType*: string       ## <Item Type=> (e.g. "StaticObject")
+  meshParamsLink*: string ## <MeshParamsLink File=> (sibling .MeshParams.xml)
+
+proc parseItemParams*(path: string): ItemParams =
+  ## Parse the `<Item AuthorName= Collection= Type=>` root + `<MeshParamsLink File=>`.
+  let s = newFileStream(path, fmRead)
+  if s == nil: raise newException(IOError, "cannot open " & path)
+  defer: s.close()
+  let root = parseXml(s)
+  result.author = root.attr("AuthorName")
+  result.collection = root.attr("Collection")
+  result.itemType = root.attr("Type")
+  for link in root.findAll("MeshParamsLink"):
+    result.meshParamsLink = link.attr("File")
+    break

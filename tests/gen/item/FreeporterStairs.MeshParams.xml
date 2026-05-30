@@ -1,0 +1,9 @@
+<?xml version="1.0" ?>
+<MeshParams Scale="1.0" MeshType="Static" Collection="Stadium" FbxFile="FreeporterStairs.fbx">
+    <Materials>
+        <Material Name="StepTech" Link="PlatformTech" PhysicsId="Asphalt" />
+        <Material Name="StepDirt" Link="RoadDirt" PhysicsId="Dirt" />
+        <Material Name="StepIce" Link="RoadIce" PhysicsId="Ice" />
+    </Materials>
+    <Lights/>
+</MeshParams>

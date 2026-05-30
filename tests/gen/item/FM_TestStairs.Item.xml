@@ -1,0 +1,10 @@
+<?xml version="1.0" ?>
+<Item AuthorName="nadeo-freeporter" Collection="Stadium" Type="StaticObject">
+    <MeshParamsLink File="FM_TestStairs.MeshParams.xml" />
+    <Phy/>
+    <Vis/>
+    <GridSnap HStep="0" VStep="0" HOffset="0" VOffset="0" />
+    <Levitation HStep="0" VStep="0" HOffset="0" VOffset="0" GhostMode="false" />
+    <Options AutoRotation="false" ManualPivotSwitch="false" NotOnItem="false" OneAxisRotation="false" />
+    <PivotSnap Distance="0" />
+</Item>
