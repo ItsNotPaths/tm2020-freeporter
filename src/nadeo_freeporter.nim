@@ -16,6 +16,7 @@ import ufbx
 import gbx
 import shape
 import mesh
+import item
 import materials
 
 const usageText = """
@@ -28,7 +29,7 @@ usage:
   nadeo-freeporter gbx <path>      debug: parse a .Gbx and dump header + body
   nadeo-freeporter --help          show this help
 
-(shape & mesh: byte-exact vs NadeoImporter on the fixture ladder; item in progress)
+(shape, mesh & item: byte-exact vs NadeoImporter on the fixture ladder)
 """
 
 type Mode = enum mMesh, mItem, mGbx, mShape
@@ -138,8 +139,32 @@ proc run(mode: Mode, path: string): int =
     echo "wrote ", meshPath
     return 0
 
-  stderr.writeLine "nadeo-freeporter: Item import of '" & path &
-    "' is not implemented yet."
+  if mode == mItem:
+    # Build the full .Item.Gbx (catalog wrapper embedding the mesh) from the FBX.
+    # Author/Collection come from the sibling <stem>.Item.xml (defaults to
+    # nadeo-freeporter / Stadium); materials from <stem>.MeshParams.xml.
+    let (ok, err, m) = loadFbx(path)
+    if not ok:
+      stderr.writeLine "error: failed to read FBX '" & path & "': " & err
+      return 1
+    let (dir, name, _) = splitFile(path)
+    let mpPath = dir / (name & ".MeshParams.xml")
+    let mats = (if fileExists(mpPath): parseMeshParams(mpPath) else: defaultMaterials())
+    let itemXml = dir / (name & ".Item.xml")
+    var author = "nadeo-freeporter"
+    var collection = "Stadium"
+    if fileExists(itemXml):
+      let ip = parseItemParams(itemXml)
+      if ip.author.len > 0: author = ip.author
+      if ip.collection.len > 0: collection = ip.collection
+    let ft = unixTimeToWinTime(int64(epochTime()))
+    let sourceTag = "NadeoImporter Item Items/" & name & ".Item.xml"
+    let outPath = dir / (name & ".Item.Gbx")
+    saveItemGbx(outPath, m, mats, name, author, collection, ft, sourceTag)
+    echo "wrote ", outPath
+    return 0
+
+  stderr.writeLine "nadeo-freeporter: unhandled mode for '" & path & "'."
   return 2
 
 proc main(): int =

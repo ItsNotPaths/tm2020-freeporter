@@ -205,13 +205,20 @@ proc writeVisual(w: var GbxWriter, mesh: FbxMesh, tris: seq[Tri], nodeIndex: int
   w.putU32(0xFACADE01'u32)        # end visual node
 
 proc buildMeshBody*(mesh: FbxMesh, materials: seq[MeshMaterial],
-                    fileWriteTime: int64, sourceTag: string): seq[byte] =
+                    fileWriteTime: int64, sourceTag: string,
+                    nodeBase: int = 0, emitIdVersion: bool = true): seq[byte] =
   ## Serialize the decompressed CPlugSolid2Model body. `materials` is the parsed
   ## MeshParams binding (Name/Link/PhysicsId). `fileWriteTime` and `sourceTag` are
   ## the only non-geometric inputs (pass a golden's values to reproduce it
   ## byte-for-byte; see module doc). Multiple materials are emitted as one visual +
   ## vertex stream per material group, N ShadedGeoms and N CPlugMaterialUserInst
   ## nodes (PreLightGen stays model-level over all triangles).
+  ##
+  ## `nodeBase` shifts every emitted node-ref index, for when this body is embedded
+  ## as a sub-node (the .Item.Gbx embeds the mesh as node 3, so nodeBase=3). All Id
+  ## writes are fresh strings (position-independent), so the only other embedding
+  ## concern is the Id-version int: it is written once per *decompressed body*, so
+  ## set `emitIdVersion=false` when an enclosing writer already emitted it.
   let groups = triGroups(mesh)
   doAssert groups.len > 0, "mesh has no triangles"
   let n = groups.len
@@ -232,7 +239,7 @@ proc buildMeshBody*(mesh: FbxMesh, materials: seq[MeshMaterial],
   var w = initGbxWriter()
   w.putU32(0x090BB000'u32)        # chunk id
   w.putI32(32)                    # version
-  w.putI32(3)                     # Id version (first Id in the body)
+  if emitIdVersion: w.putI32(3)   # Id version (only if first Id in the body)
   w.putU32(0xFFFFFFFF'u32)        # U01 = empty Id
 
   # ShadedGeom[n]: one per material group (visualIndex g, materialIndex g).
@@ -245,7 +252,7 @@ proc buildMeshBody*(mesh: FbxMesh, materials: seq[MeshMaterial],
   w.putI32(10)                    # deprec version
   w.putI32(int32(n))              # count
   for g in 0 ..< n:
-    w.writeVisual(mesh, groups[g].tris, int32(1 + 2*g))
+    w.writeVisual(mesh, groups[g].tris, int32(nodeBase + 1 + 2*g))
 
   # outer tail
   w.putI32(0)                     # materialIds[]
@@ -300,7 +307,7 @@ proc buildMeshBody*(mesh: FbxMesh, materials: seq[MeshMaterial],
   w.putI32(1)                     # U07
   # customMaterials: one CPlugMaterialUserInst per group, node index 1+2*n+g.
   for g in 0 ..< n:
-    w.writeMaterialNode(materialFor(groups[g].mat), int32(1 + 2*n + g))
+    w.writeMaterialNode(materialFor(groups[g].mat), int32(nodeBase + 1 + 2*n + g))
   # constant model tail: joints[], U10-U13, U14 ref(null), U15/U16=1.0, U17 id,
   # U18, then the skippable fake-occlusion chunk 0x090BB002 (empty) + node FACADE.
   w.putI32(0)                     # joints[]

@@ -40,6 +40,24 @@ write_meshparams() {
 XML
 }
 
+# Item.xml: a minimal static-object item referencing the fixture's MeshParams.
+# AuthorName is embedded in the .Item.Gbx (matters for byte-exactness).
+write_itemparams() {
+  local stem="$1"
+  cat > "$WORK/${stem}.Item.xml" <<XML
+<?xml version="1.0" ?>
+<Item AuthorName="nadeo-freeporter" Collection="Stadium" Type="StaticObject">
+    <MeshParamsLink File="${stem}.MeshParams.xml" />
+    <Phy/>
+    <Vis/>
+    <GridSnap HStep="0" VStep="0" HOffset="0" VOffset="0" />
+    <Levitation HStep="0" VStep="0" HOffset="0" VOffset="0" GhostMode="false" />
+    <Options AutoRotation="false" ManualPivotSwitch="false" NotOnItem="false" OneAxisRotation="false" />
+    <PivotSnap Distance="0" />
+</Item>
+XML
+}
+
 for fbx in "$REPO"/tests/gen/out/*.fbx; do
   stem="$(basename "$fbx" .fbx)"
   echo "===== $stem ====="
@@ -51,9 +69,14 @@ for fbx in "$REPO"/tests/gen/out/*.fbx; do
   else
     write_meshparams "$stem"
   fi
+  write_itemparams "$stem"
   # Importer resolves the path arg relative to Work/, leading slash.
+  # Mesh step compiles .Mesh.Gbx/.Shape.Gbx; Item step reads those + the Item.xml
+  # and emits .Item.Gbx.
   wine "$EXE" Mesh "/Items/$SUB/$stem.fbx"
-  echo "  importer exit: $?"
+  echo "  mesh exit: $?"
+  wine "$EXE" Item "/Items/$SUB/$stem.Item.xml"
+  echo "  item exit: $?"
 done
 
 echo "===== importer output dir ($OUT) ====="
