@@ -5,9 +5,8 @@
 ## "structural" spans between them. This is both the characterization of the seed
 ## and a check that the marker-scan tiling reconstructs the body exactly.
 ##
-## Use it to decide what to drop: each skippable row is a candidate for the
-## `dropByDefault` list in src/seedmap.nim. Bigger skippable chunks (lightmaps)
-## are the obvious first things to try removing.
+## Characterization + a regression check that segments() tiles the body contiguously
+## (the map former relies on that tiling to locate the 0x040 chunk it replaces).
 ##
 ## Run: nim c -r tests/seedmap_probe.nim
 

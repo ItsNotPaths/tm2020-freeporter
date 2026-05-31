@@ -147,17 +147,15 @@ proc buildAnchoredObjectsChunk(items: seq[PlacedItem]): seq[byte] =
   result = chunk.buf
 
 proc buildMapBody(items: seq[PlacedItem]): seq[byte] =
-  ## The seed body with the default chunks dropped and the (empty) 0x040 segment
-  ## replaced by our authored anchored objects. 0x054 (GrassRemover embed) is kept.
+  ## The shipped (already-stripped) seed body with the empty 0x040 segment replaced by
+  ## our authored anchored objects; everything else (incl. the 0x054 GrassRemover embed)
+  ## is copied verbatim.
   let (_, body) = loadSeed()
-  let drops = defaultDrops()
   let chunk040 = buildAnchoredObjectsChunk(items)
   result = @[]
   for s in segments(body):
     if s.chunkId == cidAnchoredObjects:
       result.add chunk040
-    elif s.skippable and s.chunkId in drops:
-      continue
     else:
       result.add body[s.lo ..< s.hi]
 

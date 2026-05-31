@@ -17,7 +17,6 @@ nimble build            # -> ./nadeo-freeporter
 nadeo-freeporter mesh  <file.fbx>   # -> .Mesh.Gbx + .Shape.Gbx (reads sibling .MeshParams.xml)
 nadeo-freeporter shape <file.fbx>   # -> .Shape.Gbx only
 nadeo-freeporter item  <file.fbx>   # -> .Item.Gbx (reads sibling .Item.xml + .MeshParams.xml)
-nadeo-freeporter seedmap <out.Gbx>  # -> blank grass-safe void .Map.Gbx
 nadeo-freeporter map   <cfg.json>   # -> place items into a .Map.Gbx (blendermania-dotnet payload)
 nadeo-freeporter gbx   <file.Gbx>   # debug: parse + dump a .Gbx
 ```

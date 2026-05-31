@@ -1,6 +1,10 @@
 vendor/
 resources.txt
-resources/
+# Ship ONLY the cleaned, freeporter-branded seed (it's staticRead at compile time, so
+# the build needs it); keep eyebo's raw base + everything else out. Can't re-include a
+# file under a fully-ignored dir, so ignore the dir's CONTENTS and re-add the one file.
+resources/*
+!resources/seed-void.Map.Gbx
 docs/
 tests/fixtures/
 tests/golden/
@@ -10,6 +14,12 @@ nadeo-freeporter
 # compiled test binaries (the .nim sources are tracked)
 tests/lzo_roundtrip
 tests/roundtrip_gbx
+tests/item_bytediff
+tests/mesh_bytediff
+tests/mesh_probe
+tests/shape_bytediff
+tests/seedmap_probe
+tests/seedmap_roundtrip
 # generated FBX fixtures + importer goldens (the generator scripts are tracked)
 tests/gen/out/
 tests/gen/golden/

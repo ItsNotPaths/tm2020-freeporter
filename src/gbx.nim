@@ -7,7 +7,7 @@
 ## Deliberately simple per the project rule: a cursor over a seq[byte] with
 ## explicit little-endian reads. No generics, no chunk codegen.
 
-import std/[streams, strutils]
+import std/[streams]
 import lzo
 
 type

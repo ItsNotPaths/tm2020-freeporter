@@ -1,23 +1,20 @@
-## .Map.Gbx (CGameCtnChallenge, class 0x03043000) seed emitter.
+## Baked void-map seed: loader + per-output brander for the map former (src/map.nim).
 ##
-## First pass of the native blendermania-dotnet replacement (docs/map-gbx-builder.md,
-## milestone 1): emit a *blank void seed map* that is 1:1 faithful — on the
-## decompressed body — to resources/seed-void.Map.Gbx. No items yet; item
-## embedding (0x03043054) and anchored-object placement (0x03043040) are later passes.
+## We ship ONE cleaned, freeporter-branded void map (resources/seed-void.Map.Gbx —
+## stripped from eyebo's "255³ Day Void Base" once at dev time) embedded at compile
+## time via staticRead. The map former opens it, edits chunk 0x03043040 (anchored
+## objects), and repacks; it never authors a map from scratch (see todo.md: the body is
+## ~all 0x01F block data, so "from scratch" would just move that megabyte into Nim).
 ##
-## Approach (minimal, droppable): the real seed is embedded at compile time and its
-## body decompressed once at runtime, then re-emitted via the shared GBX core
-## (src/gbx.nim — same loadGbx/saveGbx the item builder uses). The body is tiled
-## into `Segment`s: every *skippable* top-level chunk (lightmaps, block-data-adjacent
-## skippables, embedded zip, etc.) is its own named, individually-disable-able slice;
-## everything between them is opaque "structural" passthrough. With all segments
-## enabled the rebuilt body is byte-identical to the seed (the faithful pass); to
-## experiment with dropping a chunk, flip its `enabled` to false (see dropByDefault).
+## This module decompresses the embedded seed via the shared GBX core (src/gbx.nim) and
+## tiles its body into `Segment`s (marker-scan on the chunkId+"PIKS" anchor) so the map
+## former can locate the 0x040 chunk to replace; `patchUserData` re-brands the header
+## (UID / name / author) per output.
 ##
 ## Note: the *file* is not byte-identical to the seed — we recompress with LZO1X-1
 ## while Nadeo uses LZO1X-999. Fidelity is on the decompressed body (same as items).
 
-import std/[strutils, os]
+import std/[strutils]
 import gbx
 
 const SKIP = 0x534B4950'u32          # "PIKS" on disk — the skippable-chunk marker
@@ -65,36 +62,6 @@ const skippableChunks: seq[(uint32, string)] = @[
   (0x0304306C'u32, "color palette"),
 ]
 
-## Chunks stripped from the generated seed by default.
-##
-## Determined empirically by an in-game grass bisection (2026-05-30, fp ladder).
-## The void base places a GrassRemover custom block; its no-grass effect needs the
-## embedded def 0x03043054 PLUS the chunks below it kept. The proven-safe line is
-## fp12's config: drop ONLY these 12 cosmetic/lighting/map-element cache chunks (all
-## above 0x054); keep everything from 0x054 down. This was load/save/TMX-publish-safe
-## with NO visual change (grass stays removed). Stripping further — into 0x054 or the
-## chunks below it — brings the grass back, so we stop here for the default.
-## (Bigger cruft like genealogies 0x043 / baked blocks 0x048 sit below 0x054 and are
-## NOT stripped by default; a future targeted test could reclaim them if grass-safe.)
-const dropByDefault: seq[uint32] = @[
-  0x03043069'u32,  # macroblock instances
-  0x03043068'u32,  # MapElemLmQuality
-  0x03043065'u32,  # foreground pack desc
-  0x03043063'u32,  # AnimPhaseOffset
-  0x03043062'u32,  # MapElemColor
-  0x03043060'u32,  # 0x060
-  0x0304305F'u32,  # free blocks
-  0x0304305B'u32,  # lightmaps
-  0x0304305A'u32,  # 0x05A
-  0x03043059'u32,  # world distortion
-  0x03043056'u32,  # light settings
-  0x03043055'u32,  # 0x055
-  # Below 0x054 but verified grass-safe in-game (the "LEAN" probe), so also dropped:
-  0x03043048'u32,  # baked blocks  (~266 KB compressed)
-  0x03043043'u32,  # genealogies   (~2 MB decompressed cruft)
-  0x03043044'u32,  # metadata
-]
-
 type Segment* = object
   label*: string          # human label, e.g. "lightmaps"
   chunkId*: uint32        # 0 for structural passthrough spans
@@ -129,7 +96,7 @@ proc segments*(body: seq[byte]): seq[Segment] =
   ## (chunkId + "PIKS" marker + size) anchor, with opaque structural spans between.
   ## The tiling is contiguous, so concatenating every segment reproduces `body`
   ## exactly; dropping a (skippable) segment removes precisely that chunk's bytes.
-  ## All segments come back `enabled`; the body builder applies the drop set.
+  ## The map former (src/map.nim) replaces the 0x040 segment and copies the rest.
   var cuts: seq[Segment] = @[]
   var i = 0
   while i + 12 <= body.len:
@@ -158,16 +125,6 @@ proc segments*(body: seq[byte]): seq[Segment] =
   if pos < body.len:
     result.add Segment(label: "structural", chunkId: 0, lo: pos, hi: body.len,
                        skippable: false, enabled: true)
-
-proc buildSeedMapBody*(drop: seq[uint32] = dropByDefault): seq[byte] =
-  ## The decompressed map body to emit: every segment concatenated except skippable
-  ## chunks whose id is in `drop`. With `drop` empty this is byte-identical to the
-  ## seed body. Structural spans (chunkId 0) are always kept.
-  let (_, body) = loadSeed()
-  result = @[]
-  for s in segments(body):
-    if s.skippable and s.chunkId in drop: continue
-    result.add body[s.lo ..< s.hi]
 
 proc patchUserData*(userData: seq[byte], uid, mapName: string,
                     authorLogin = "", authorNick = "", authorZone = ""): seq[byte] =
@@ -276,27 +233,19 @@ proc seedMapInfo*(): GbxInfo =
   result = info
   result.bodyCompression = gcCompressed   # always re-emit compressed
 
-proc saveSeedMapGbx*(path: string, drop: seq[uint32] = dropByDefault) =
-  ## Write a blank void seed map to `path`, omitting any skippable chunk in `drop`.
-  saveGbx(path, seedMapInfo(), buildSeedMapBody(drop))
-
-# Author identity stamped on generated seeds (replaces the eyebo template's author).
+# Author identity. The baked seed is already freeporter-branded; this re-brands each
+# emitted map with a fresh UID/name so TM doesn't dedupe and outputs are distinguishable.
 const fpLogin* = "freeporter"
 const fpNick* = "freeporter"
 const fpZone* = "World"
 
 proc seedMapInfoNamed*(uid, mapName: string,
                        login = fpLogin, nick = fpNick, zone = fpZone): GbxInfo =
-  ## Like seedMapInfo but with a fresh MapUid + MapName + author (so TM doesn't dedupe,
-  ## variants are distinguishable, and the map is branded freeporter, not eyebo).
+  ## Like seedMapInfo but with a fresh MapUid + MapName + author. Used by the map
+  ## former (src/map.nim) to brand each output.
   result = seedMapInfo()
   result.userData = patchUserData(result.userData, uid, mapName, login, nick, zone)
   result.userDataLen = result.userData.len
-
-proc saveSeedMapGbxNamed*(path: string, drop: seq[uint32], uid, mapName: string,
-                          login = fpLogin, nick = fpNick, zone = fpZone) =
-  ## Write a seed map with a unique UID/name, freeporter author, and dropped chunks.
-  saveGbx(path, seedMapInfoNamed(uid, mapName, login, nick, zone), buildSeedMapBody(drop))
 
 proc uidFromName*(s: string): string =
   ## Deterministic 27-char base64url-ish MapUid derived from a string (no RNG, so
@@ -309,13 +258,3 @@ proc uidFromName*(s: string): string =
   for i in 0 ..< 27:
     result[i] = alpha[int(x and 63)]
     x = (x shr 5) xor (x * 6364136223846793005'u64)
-
-proc saveSeedMap*(path: string, drop: seq[uint32] = dropByDefault) =
-  ## Production generator: emit a stripped, freeporter-branded seed to `path`, with a
-  ## MapName from the file stem and a deterministic UID. This is what the CLI calls.
-  let name = splitFile(path).name
-  saveSeedMapGbxNamed(path, drop, uidFromName(name), name)
-
-proc defaultDrops*(): seq[uint32] = dropByDefault
-  ## The production strip set (all skippables except keepChunks). For callers that
-  ## want to emit the default-stripped seed with a custom UID/name.
